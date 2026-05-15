@@ -86,6 +86,80 @@ app downloads the official Python 3.11.9 x64 embeddable runtime from python.org,
 extracts it under `%LOCALAPPDATA%\LiveDialogue Translator\runtime\python-3.11.9`,
 bootstraps pip, and installs the worker dependencies there.
 
+## Model Combination Hardware Guide
+
+The numbers below are conservative minimums for the current selectable model
+families in this app. They are intended for short live captures and model
+loading without out-of-memory failures. Real-time stability improves
+significantly with the recommended CUDA path and lower preset/model choices.
+They are app-level planning baselines, not official vendor guarantees.
+
+Important assumptions:
+
+- CPU mode means `Compute = CPU`. It is practical for light Whisper models, but
+  large Whisper, Qwen3-ASR, WhisperX, and Sortformer can fall behind real time.
+- CUDA mode means an NVIDIA GPU with current drivers and enough free VRAM. Avoid
+  running another heavy CUDA workload at the same time.
+- Qwen3-ASR uses the Qwen3 forced aligner by default, so the 0.6B aligner must
+  also fit in memory.
+- `Diart` uses CPU by default when `Compute = Auto`; choose `Compute = CUDA` if
+  you want Diart to run on the GPU.
+- `Sortformer` uses the WhisperLiveKit Sortformer package even when the selected
+  ASR engine is not WhisperLiveKit.
+- Keep at least 30 GB free disk for one heavy setup and 50-80 GB if you install
+  every optional ASR engine and model cache.
+
+### ASR-only minimums
+
+Use this table when speaker diarization is disabled.
+
+| ASR engine / model | CPU minimum | CUDA minimum | Notes |
+| --- | --- | --- | --- |
+| Faster-Whisper `tiny`, `base`, `small` | 4 CPU cores, 8 GB RAM | 4 GB VRAM, 8 GB RAM | Best CPU-compatible path. |
+| Faster-Whisper `medium`, `large-v3`, `large-v3-turbo` | 8 CPU cores, 16 GB RAM | 8 GB VRAM, 16 GB RAM | CPU works, but large models may not keep up in live use. |
+| Qwen3-ASR `0.6B` + forced aligner | 8 CPU cores, 32 GB RAM | 8 GB VRAM, 24 GB RAM | CPU is mainly for testing; CUDA is strongly preferred. |
+| Qwen3-ASR `1.7B` + forced aligner | 12 CPU cores, 48 GB RAM | 12 GB VRAM, 32 GB RAM | Default Qwen model; use CUDA for realistic latency. |
+| WhisperLiveKit default (`large-v3-turbo`) | 8 CPU cores, 24 GB RAM | 8 GB VRAM, 16 GB RAM | Streaming stack; CUDA recommended. |
+| WhisperX `tiny`, `base`, `small` | 8 CPU cores, 16 GB RAM | 6 GB VRAM, 16 GB RAM | Alignment adds memory and startup cost over faster-whisper. |
+| WhisperX `medium`, `large-v3`, `large-v3-turbo` | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | Lower batch/model size if CUDA memory is tight. |
+
+### ASR + speaker diarization minimums
+
+Use this table when speaker diarization is enabled. `Community-1` and `Diart`
+require accepted Hugging Face model terms and a valid token. `Sortformer` does
+not require pyannote model access, but it is the most CUDA-oriented diarization
+path.
+
+| ASR engine / model | Diarization model | CPU minimum | CUDA minimum | Notes |
+| --- | --- | --- | --- | --- |
+| Faster-Whisper `tiny/base/small` | Community-1 | 4 CPU cores, 16 GB RAM | 6 GB VRAM, 16 GB RAM | Lowest balanced setup with speaker labels. |
+| Faster-Whisper `tiny/base/small` | Diart | 4 CPU cores, 16 GB RAM | 6 GB VRAM, 16 GB RAM | Good low-latency choice; Auto keeps Diart on CPU. |
+| Faster-Whisper `tiny/base/small` | Sortformer | 8 CPU cores, 16 GB RAM | 8 GB VRAM, 16 GB RAM | CPU is usable only for light testing. |
+| Faster-Whisper `medium/large-v3/large-v3-turbo` | Community-1 | 8 CPU cores, 32 GB RAM | 8 GB VRAM, 24 GB RAM | CUDA recommended for live captions. |
+| Faster-Whisper `medium/large-v3/large-v3-turbo` | Diart | 8 CPU cores, 32 GB RAM | 8 GB VRAM, 24 GB RAM | Stable if ASR model fits comfortably. |
+| Faster-Whisper `medium/large-v3/large-v3-turbo` | Sortformer | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | Prefer 12 GB+ VRAM for `large-v3`. |
+| Qwen3-ASR `0.6B` + forced aligner | Community-1 | 8 CPU cores, 32 GB RAM | 8 GB VRAM, 24 GB RAM | CPU latency is high; use smaller chunks/presets if needed. |
+| Qwen3-ASR `0.6B` + forced aligner | Diart | 8 CPU cores, 32 GB RAM | 8 GB VRAM, 24 GB RAM | CUDA leaves more CPU headroom for capture and translation. |
+| Qwen3-ASR `0.6B` + forced aligner | Sortformer | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | Runs two heavy neural stacks; CUDA strongly preferred. |
+| Qwen3-ASR `1.7B` + forced aligner | Community-1 | 12 CPU cores, 48 GB RAM | 12 GB VRAM, 32 GB RAM | Practical minimum for the default Qwen setup. |
+| Qwen3-ASR `1.7B` + forced aligner | Diart | 12 CPU cores, 48 GB RAM | 12 GB VRAM, 32 GB RAM | Use CUDA and close other GPU workloads. |
+| Qwen3-ASR `1.7B` + forced aligner | Sortformer | 16 CPU cores, 64 GB RAM | 12 GB VRAM, 32 GB RAM | 16 GB VRAM is more comfortable for long sessions. |
+| WhisperLiveKit default (`large-v3-turbo`) | Community-1 | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | WhisperLiveKit handles ASR; pyannote handles diarization. |
+| WhisperLiveKit default (`large-v3-turbo`) | Diart | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | Use CUDA if Diart should not consume CPU headroom. |
+| WhisperLiveKit default (`large-v3-turbo`) | Sortformer | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | Native WhisperLiveKit + Sortformer streaming path. |
+| WhisperX `tiny/base/small` | Community-1 | 8 CPU cores, 16 GB RAM | 8 GB VRAM, 16 GB RAM | Word alignment and diarization both add overhead. |
+| WhisperX `tiny/base/small` | Diart | 8 CPU cores, 16 GB RAM | 8 GB VRAM, 16 GB RAM | Good if word timestamps matter more than lowest latency. |
+| WhisperX `tiny/base/small` | Sortformer | 8 CPU cores, 24 GB RAM | 10 GB VRAM, 24 GB RAM | Sortformer adds the WhisperLiveKit runtime package. |
+| WhisperX `medium/large-v3/large-v3-turbo` | Community-1 | 12 CPU cores, 32 GB RAM | 12 GB VRAM, 32 GB RAM | Reduce WhisperX batch size if memory is tight. |
+| WhisperX `medium/large-v3/large-v3-turbo` | Diart | 12 CPU cores, 32 GB RAM | 12 GB VRAM, 32 GB RAM | Heavy but reasonable on 12 GB+ NVIDIA GPUs. |
+| WhisperX `medium/large-v3/large-v3-turbo` | Sortformer | 16 CPU cores, 48 GB RAM | 12 GB VRAM, 32 GB RAM | 16 GB VRAM is preferred for long sessions. |
+
+For a general-purpose Windows desktop setup using CUDA, the practical baseline
+is a modern 8-core CPU, 32 GB system RAM, and an NVIDIA GPU with 12 GB VRAM.
+That class of machine can cover every selectable combination, although
+Qwen3-ASR `1.7B` plus Sortformer or WhisperX large plus Sortformer benefits
+from 16 GB VRAM.
+
 ## Quick Start
 
 1. Build or package the app with the commands below.
