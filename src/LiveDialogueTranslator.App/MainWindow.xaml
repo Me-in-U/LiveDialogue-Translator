@@ -1,0 +1,818 @@
+<Window x:Class="LiveDialogueTranslator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LiveDialogueTranslator.App"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:vm="clr-namespace:LiveDialogueTranslator.App.ViewModels"
+        Title="LiveDialogue Translator"
+        Width="920"
+        Height="320"
+        MinWidth="860"
+        MinHeight="300"
+        Background="{StaticResource WindowBrush}"
+        ResizeMode="CanResizeWithGrip"
+        Topmost="True"
+        WindowStyle="None">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="10"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="6"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <local:LineLimitHeightConverter x:Key="LineLimitHeightConverter" />
+        <Style x:Key="NavButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Margin" Value="5,3" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style x:Key="IconPathStyle" TargetType="Path">
+            <Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+            <Setter Property="StrokeThickness" Value="2" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
+        <Style x:Key="IconFillPathStyle" TargetType="Path">
+            <Setter Property="Fill" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
+        </Style>
+        <Style x:Key="SettingsGroupBorderStyle" TargetType="Border">
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="8,7,8,8" />
+            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
+        </Style>
+        <Style x:Key="SettingsGroupTitleStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="ConsoleKeepBottomButtonStyle" TargetType="{x:Type ToggleButton}">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="{StaticResource PanelAltBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource PanelBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#243C50" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1E4C6E" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True" />
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#245A80" />
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#262324" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#343031" />
+                                <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <DataTemplate DataType="{x:Type vm:CaptionEntryViewModel}">
+            <Grid Margin="0,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="96" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="58" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Text="{Binding SpeakerName}" />
+                <StackPanel Grid.Column="1">
+                    <TextBlock TextWrapping="Wrap" Text="{Binding DisplayOriginalText}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DisplayOriginalText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Margin="0,5,0,0" Foreground="#FFFFF2A8" TextWrapping="Wrap" Text="{Binding DisplayTranslatedText}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DisplayTranslatedText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+                <TextBlock Grid.Column="2" Foreground="{StaticResource MutedBrush}" TextAlignment="Right" Text="{Binding LatencyText}" />
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="28" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Background="{StaticResource TitleBrush}" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Grid>
+                <StackPanel Margin="13,0,0,0" VerticalAlignment="Center" Orientation="Horizontal">
+                    <Image x:Name="TitleIcon" Width="16" Height="16" />
+                    <TextBlock x:Name="TitleText" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" Text="LiveDialogue Translator" />
+                </StackPanel>
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                    <Button x:Name="StartButton" Width="42" Height="26" Padding="0" Background="Transparent" BorderThickness="0" Click="StartButton_Click" ToolTip="Start capture">
+                        <Grid Width="16" Height="16">
+                            <Viewbox x:Name="StartPlayIcon">
+                                <Canvas Width="24" Height="24">
+                                    <Path Style="{StaticResource IconFillPathStyle}" Data="M8,5 L19,12 L8,19 Z" />
+                                </Canvas>
+                            </Viewbox>
+                            <Viewbox x:Name="StartStopIcon" Visibility="Collapsed">
+                                <Canvas Width="24" Height="24">
+                                    <Path Style="{StaticResource IconFillPathStyle}" Data="M7,7 L17,7 L17,17 L7,17 Z" />
+                                </Canvas>
+                            </Viewbox>
+                        </Grid>
+                    </Button>
+                    <Button x:Name="OverlayButton" Width="42" Height="26" Padding="0" Background="Transparent" BorderThickness="0" Click="OverlayButton_Click" ToolTip="Overlay window">
+                        <Viewbox Width="16" Height="16">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconPathStyle}" Data="M4,8 L15,8 L15,18 L4,18 Z" />
+                                <Path Style="{StaticResource IconPathStyle}" Data="M9,5 L20,5 L20,15" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="TopmostButton" Width="42" Height="26" Padding="0" Background="Transparent" BorderThickness="0" Click="TopmostButton_Click" ToolTip="Always on top">
+                        <Viewbox Width="16" Height="16">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconPathStyle}" Data="M8,4 L16,4 L15,10 L18,13 L13,13 L13,21 L11,21 L11,13 L6,13 L9,10 Z" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="MinimizeButton" Width="42" Height="26" Padding="0" Background="Transparent" BorderThickness="0" Click="MinimizeButton_Click" ToolTip="Minimize">
+                        <Viewbox Width="16" Height="16">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconPathStyle}" Data="M6,12 L18,12" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="CloseButton" Width="42" Height="26" Padding="0" Background="Transparent" BorderThickness="0" Click="CloseButton_Click" ToolTip="Close">
+                        <Viewbox Width="16" Height="16">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconPathStyle}" Data="M7,7 L17,17 M17,7 L7,17" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="49" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource NavBrush}">
+                <Grid Margin="0,5,0,5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                    <Button x:Name="CaptionNavButton" Style="{StaticResource NavButtonStyle}" Click="CaptionNavButton_Click" ToolTip="Captions">
+                        <Viewbox Width="17" Height="17">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconPathStyle}" Data="M4,6 L20,6 L20,17 L7,17 L4,20 Z" />
+                                <Path Style="{StaticResource IconPathStyle}" Data="M8,10 L16,10 M8,14 L13,14" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="SettingsNavButton" Style="{StaticResource NavButtonStyle}" Click="SettingsNavButton_Click" ToolTip="Settings">
+                        <Viewbox Width="17" Height="17">
+                            <Canvas Width="24" Height="24">
+                                <Ellipse Canvas.Left="8" Canvas.Top="8" Width="8" Height="8" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" />
+                                <Path Style="{StaticResource IconPathStyle}" Data="M12,3 L12,6 M12,18 L12,21 M3,12 L6,12 M18,12 L21,12 M5.6,5.6 L7.8,7.8 M16.2,16.2 L18.4,18.4 M18.4,5.6 L16.2,7.8 M7.8,16.2 L5.6,18.4" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="ConsoleNavButton" Style="{StaticResource NavButtonStyle}" Click="ConsoleNavButton_Click" ToolTip="Console">
+                        <Viewbox Width="17" Height="17">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconPathStyle}" Data="M4,5 L20,5 L20,19 L4,19 Z" />
+                                <Path Style="{StaticResource IconPathStyle}" Data="M8,9 L11,12 L8,15 M13,15 L17,15" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    </StackPanel>
+                    <Button x:Name="InfoNavButton" Grid.Row="2" Style="{StaticResource NavButtonStyle}" Click="InfoNavButton_Click" ToolTip="Info">
+                        <Viewbox Width="17" Height="17">
+                            <Canvas Width="24" Height="24">
+                                <Ellipse Canvas.Left="5" Canvas.Top="5" Width="14" Height="14" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="2" />
+                                <Path Style="{StaticResource IconPathStyle}" Data="M12,11 L12,16 M12,8 L12,8.1" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1">
+                <Grid x:Name="CaptionPanel" Margin="6,6,15,5">
+                    <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="4">
+                        <Grid Margin="10,8,10,5">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="18" />
+                                <RowDefinition Height="18" />
+                                <RowDefinition Height="5" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <ItemsControl x:Name="CaptionSpeakerItems" FontSize="12">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,3">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="96" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Foreground="{Binding SpeakerBrush}"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Text="{Binding SpeakerName}" />
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock local:SegmentedTextBlockBehavior.Segments="{Binding OriginalSegments}"
+                                                               local:SegmentedTextBlockBehavior.MaxVisualLines="{Binding LinesPerSpeaker}"
+                                                               ClipToBounds="True"
+                                                               TextWrapping="Wrap">
+                                                        <TextBlock.MaxHeight>
+                                                            <MultiBinding Converter="{StaticResource LineLimitHeightConverter}">
+                                                                <Binding Path="LinesPerSpeaker" />
+                                                                <Binding RelativeSource="{RelativeSource Self}" Path="FontSize" />
+                                                            </MultiBinding>
+                                                        </TextBlock.MaxHeight>
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding OriginalDisplayText}" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Margin="0,4,0,0"
+                                                               local:SegmentedTextBlockBehavior.Segments="{Binding TranslationSegments}"
+                                                               local:SegmentedTextBlockBehavior.MaxVisualLines="{Binding LinesPerSpeaker}"
+                                                               ClipToBounds="True"
+                                                               TextWrapping="Wrap">
+                                                        <TextBlock.MaxHeight>
+                                                            <MultiBinding Converter="{StaticResource LineLimitHeightConverter}">
+                                                                <Binding Path="LinesPerSpeaker" />
+                                                                <Binding RelativeSource="{RelativeSource Self}" Path="FontSize" />
+                                                            </MultiBinding>
+                                                        </TextBlock.MaxHeight>
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding TranslatedDisplayText}" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Grid x:Name="CaptionPlaceholderPanel">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="96" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="CurrentSpeakerText"
+                                               Grid.Column="0"
+                                               FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis"
+                                               Text="Original" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock x:Name="CurrentOriginalText"
+                                                   Text="Press start to capture system audio and microphone."
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock x:Name="CurrentTranslationText"
+                                                   Margin="0,5,0,0"
+                                                   Foreground="#FFFFF2A8"
+                                                   TextWrapping="Wrap"
+                                                   Visibility="Collapsed" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="DebugStateText"
+                                           Grid.Column="0"
+                                           VerticalAlignment="Bottom"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="DetailStatusText"
+                                           Grid.Column="1"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Bottom"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           TextAlignment="Right"
+                                           Text="Ready" />
+                            </Grid>
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="StatusText"
+                                           Grid.Column="0"
+                                           VerticalAlignment="Bottom"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           Text="Ready" />
+                                <Button x:Name="DetailActionButton"
+                                        Grid.Column="1"
+                                        Width="92"
+                                        Height="22"
+                                        Margin="8,-2,0,0"
+                                        Padding="0"
+                                        FontSize="11"
+                                        Visibility="Collapsed"
+                                        Click="DetailActionButton_Click"
+                                        ToolTip="Open HF token settings">Set Token</Button>
+                            </Grid>
+                            <ProgressBar x:Name="InlineProgressBar" Grid.Row="3" Height="3" Minimum="0" Maximum="100" Visibility="Collapsed" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="SettingsPanel" Margin="10,8,10,6" VerticalAlignment="Top" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="1*" />
+                        <ColumnDefinition Width="1*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Margin="0,0,7,0">
+                        <Border Style="{StaticResource SettingsGroupBorderStyle}" Margin="0,0,0,7">
+                            <StackPanel>
+                                <TextBlock x:Name="SettingsAudioGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Audio" />
+                                <TextBlock x:Name="AudioSourcesLabel" Margin="2,0,0,4" Text="Audio Sources" />
+                                <ComboBox x:Name="InputModeBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                    <ComboBoxItem x:Name="InputSystemMicItem" Content="System + Mic" Tag="SystemAndMic" />
+                                    <ComboBoxItem x:Name="InputSystemOnlyItem" Content="System Only" Tag="SystemAudioOnly" />
+                                    <ComboBoxItem x:Name="InputMixedDeviceItem" Content="Mixed Device" Tag="MixedDevice" />
+                                </ComboBox>
+                                <TextBlock x:Name="MicMonitorLabel" Margin="2,7,0,3" Text="Mic Monitor" />
+                                <Slider x:Name="MicMonitorSlider" Minimum="0" Maximum="100" Value="62" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SettingsGroupBorderStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="SettingsToolsGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Tools" />
+                                <TextBlock x:Name="ModelManagerLabel" Margin="2,0,0,4" Text="Model Manager" />
+                                <Button x:Name="ModelManagerButton" Height="28" Click="ModelManagerButton_Click">Open</Button>
+                                <TextBlock x:Name="DebugLabel" Margin="2,7,0,3" Text="Debug" />
+                                <Button x:Name="DebugButton" Height="28" Click="DebugButton_Click">Console</Button>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Border Grid.Column="1" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
+                        <StackPanel>
+                            <TextBlock x:Name="SettingsModelGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Model" />
+                            <TextBlock x:Name="AsrEngineLabel" Margin="2,0,0,4" Text="ASR Engine" />
+                            <ComboBox x:Name="AsrEngineBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                <ComboBoxItem x:Name="AsrEngineFasterWhisperItem" Content="Faster-Whisper" Tag="None" />
+                                <ComboBoxItem x:Name="AsrEngineQwenItem" Content="Qwen3-ASR + diarization" Tag="Qwen3Asr" />
+                                <ComboBoxItem x:Name="AsrEngineWhisperLiveKitItem" Content="WhisperLiveKit + Sortformer" Tag="WhisperLiveKitSortformer" />
+                                <ComboBoxItem x:Name="AsrEngineWhisperXItem" Content="WhisperX" Tag="WhisperX" />
+                            </ComboBox>
+                            <TextBlock x:Name="AsrEngineHintText"
+                                       Margin="2,4,0,0"
+                                       FontSize="10.5"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock x:Name="SttModelLabel" Margin="2,7,0,4" Text="STT Model" />
+                            <ComboBox x:Name="SttModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                <ComboBoxItem x:Name="SttDefaultItem" Content="Default" />
+                                <ComboBoxItem x:Name="SttTinyItem" Content="tiny" />
+                                <ComboBoxItem x:Name="SttBaseItem" Content="base" />
+                                <ComboBoxItem x:Name="SttSmallItem" Content="small" />
+                                <ComboBoxItem x:Name="SttMediumItem" Content="medium" />
+                                <ComboBoxItem x:Name="SttLargeV3Item" Content="large-v3" />
+                                <ComboBoxItem x:Name="SttLargeV3TurboItem" Content="large-v3-turbo" />
+                                <ComboBoxItem x:Name="SttQwen06BItem" Content="qwen3-asr-0.6b" />
+                                <ComboBoxItem x:Name="SttQwen17BItem" Content="qwen3-asr-1.7b" />
+                            </ComboBox>
+                            <TextBlock x:Name="SttLanguagesLabel" Margin="2,7,0,3" Text="STT Languages" />
+                            <Button x:Name="SttLanguagesButton" Height="28" Click="SttLanguagesButton_Click">Auto</Button>
+                            <TextBlock x:Name="ComputeLabel" Margin="2,7,0,3" Text="Compute" />
+                            <ComboBox x:Name="ComputeModeBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                <ComboBoxItem x:Name="ComputeAutoItem" Content="Auto" Tag="Auto" />
+                                <ComboBoxItem Content="CPU" Tag="Cpu" />
+                                <ComboBoxItem Content="CUDA" Tag="Cuda" />
+                            </ComboBox>
+                            <TextBlock x:Name="SttPresetLabel" Margin="2,7,0,3" Text="Preset" />
+                            <UniformGrid Columns="3" Margin="0,1,0,0">
+                                <RadioButton x:Name="SttPresetSpeedRadio"
+                                             GroupName="SttPreset"
+                                             Height="26"
+                                             Content="Sensitive"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="SttPresetDebateRadio"
+                                             GroupName="SttPreset"
+                                             Height="26"
+                                             Content="Balanced"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="SttPresetTalkShowRadio"
+                                             GroupName="SttPreset"
+                                             Height="26"
+                                             Content="Stable"
+                                             Checked="RestartSetting_CheckedChanged" />
+                            </UniformGrid>
+                            <TextBlock x:Name="SttPresetSummaryText"
+                                       MinHeight="16"
+                                       Margin="0,3,0,0"
+                                       FontSize="11"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="2" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
+                        <StackPanel>
+                            <TextBlock x:Name="SettingsDiarizationGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Diarization" />
+                            <TextBlock x:Name="DiarizationLabel" Margin="2,0,0,4" Text="Diarization" />
+                            <CheckBox x:Name="DiarizationCheck" Height="26" Content="On" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
+                            <TextBlock x:Name="DiarizationModelLabel" Margin="2,7,0,3" Text="Diarization Model" />
+                            <UniformGrid x:Name="DiarizationModelPanel" Columns="2" Margin="0,1,0,0">
+                                <RadioButton x:Name="DiarizationCommunityRadio"
+                                             GroupName="DiarizationModel"
+                                             Height="26"
+                                             Content="Community-1"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="DiarizationDiartRadio"
+                                             GroupName="DiarizationModel"
+                                             Height="26"
+                                             Content="Diart"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="DiarizationSortformerRadio"
+                                             GroupName="DiarizationModel"
+                                             Height="26"
+                                             Content="Sortformer"
+                                             Checked="RestartSetting_CheckedChanged" />
+                            </UniformGrid>
+                            <TextBlock x:Name="DiarizationPresetLabel" Margin="2,7,0,3" Text="Diarization Preset" />
+                            <UniformGrid Columns="3" Margin="0,1,0,0">
+                                <RadioButton x:Name="DiarizationPresetSensitiveRadio"
+                                             GroupName="DiarizationPreset"
+                                             Height="26"
+                                             Content="Sensitive"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="DiarizationPresetBalancedRadio"
+                                             GroupName="DiarizationPreset"
+                                             Height="26"
+                                             Content="Balanced"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="DiarizationPresetStableRadio"
+                                             GroupName="DiarizationPreset"
+                                             Height="26"
+                                             Content="Stable"
+                                             Checked="RestartSetting_CheckedChanged" />
+                            </UniformGrid>
+                            <CheckBox x:Name="DiartManualCheck"
+                                      Height="24"
+                                      Margin="0,7,0,0"
+                                      Content="Manual Diart tuning"
+                                      Checked="RestartSetting_CheckedChanged"
+                                      Unchecked="RestartSetting_CheckedChanged" />
+                            <TextBlock x:Name="DiartManualDescriptionText"
+                                       Margin="2,2,0,3"
+                                       FontSize="10.5"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap" />
+                            <Grid x:Name="DiartManualPanel">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock x:Name="DiartDurationLabel" Grid.Row="0" Grid.Column="0" Margin="2,4,0,2" Text="Duration" />
+                                <TextBox x:Name="DiartDurationBox" Grid.Row="1" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                <TextBlock x:Name="DiartStepLabel" Grid.Row="0" Grid.Column="2" Margin="2,4,0,2" Text="Step" />
+                                <TextBox x:Name="DiartStepBox" Grid.Row="1" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                <TextBlock x:Name="DiartLatencyLabel" Grid.Row="2" Grid.Column="0" Margin="2,6,0,2" Text="Latency" />
+                                <TextBox x:Name="DiartLatencyBox" Grid.Row="3" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                <TextBlock x:Name="DiartTauLabel" Grid.Row="2" Grid.Column="2" Margin="2,6,0,2" Text="Tau" />
+                                <TextBox x:Name="DiartTauBox" Grid.Row="3" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                <TextBlock x:Name="DiartRhoLabel" Grid.Row="4" Grid.Column="0" Margin="2,6,0,2" Text="Rho" />
+                                <TextBox x:Name="DiartRhoBox" Grid.Row="5" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                <TextBlock x:Name="DiartDeltaLabel" Grid.Row="4" Grid.Column="2" Margin="2,6,0,2" Text="Delta" />
+                                <TextBox x:Name="DiartDeltaBox" Grid.Row="5" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                            </Grid>
+                            <TextBlock x:Name="SpeakersLabel" Margin="2,7,0,3" Text="Speakers" />
+                            <UniformGrid x:Name="SpeakerCountPanel" Columns="4" Margin="0,1,0,0">
+                                <RadioButton x:Name="MaxSpeakers1Radio" Content="1" GroupName="SpeakerCount" Tag="auto:1" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers2Radio" Content="2" GroupName="SpeakerCount" Tag="auto:2" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers3Radio" Content="3" GroupName="SpeakerCount" Tag="auto:3" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers4Radio" Content="4" GroupName="SpeakerCount" Tag="auto:4" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers5Radio" Content="5" GroupName="SpeakerCount" Tag="auto:5" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers6Radio" Content="6" GroupName="SpeakerCount" Tag="auto:6" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers7Radio" Content="7" GroupName="SpeakerCount" Tag="auto:7" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="MaxSpeakers8Radio" Content="8" GroupName="SpeakerCount" Tag="auto:8" Height="23" Checked="RestartSetting_CheckedChanged" />
+                            </UniformGrid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="3" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
+                        <StackPanel>
+                            <TextBlock x:Name="SettingsTranslationGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Translation" />
+                            <TextBlock x:Name="TranslateApiLabel" Margin="2,0,0,4" Text="Translate API" />
+                            <ComboBox x:Name="TranslateProviderBox" Height="28" SelectionChanged="TranslationSetting_SelectionChanged">
+                                <ComboBoxItem x:Name="TranslateProviderGoogleItem" Content="Google" Tag="Google" />
+                                <ComboBoxItem x:Name="TranslateProviderGoogle2Item" Content="Google2" Tag="Google2" />
+                                <ComboBoxItem x:Name="TranslateProviderOllamaItem" Content="Ollama" Tag="Ollama" />
+                                <ComboBoxItem x:Name="TranslateProviderOpenAIItem" Content="OpenAI" Tag="OpenAI" />
+                                <ComboBoxItem x:Name="TranslateProviderOpenRouterItem" Content="OpenRouter" Tag="OpenRouter" />
+                                <ComboBoxItem x:Name="TranslateProviderDeepLItem" Content="DeepL" Tag="DeepL" />
+                                <ComboBoxItem x:Name="TranslateProviderYoudaoItem" Content="Youdao" Tag="Youdao" />
+                                <ComboBoxItem x:Name="TranslateProviderBaiduItem" Content="Baidu" Tag="Baidu" />
+                                <ComboBoxItem x:Name="TranslateProviderMTranServerItem" Content="MTranServer" Tag="MTranServer" />
+                                <ComboBoxItem x:Name="TranslateProviderLibreTranslateItem" Content="LibreTranslate" Tag="LibreTranslate" />
+                            </ComboBox>
+                            <TextBlock x:Name="TargetLanguageLabel" Margin="2,7,0,3" Text="Target Language" />
+                            <ComboBox x:Name="TargetLanguageBox" Height="28" MaxDropDownHeight="220" SelectionChanged="TranslationSetting_SelectionChanged">
+                                <ComboBoxItem Content="ko-KR" Tag="ko" />
+                                <ComboBoxItem Content="en-US" Tag="en" />
+                                <ComboBoxItem Content="en-GB" Tag="en" />
+                                <ComboBoxItem Content="ja-JP" Tag="ja" />
+                                <ComboBoxItem Content="zh-CN" Tag="zh-CN" />
+                                <ComboBoxItem Content="zh-TW" Tag="zh-TW" />
+                                <ComboBoxItem Content="fr-FR" Tag="fr" />
+                                <ComboBoxItem Content="de-DE" Tag="de" />
+                                <ComboBoxItem Content="th-TH" Tag="th" />
+                                <ComboBoxItem Content="ru-RU" Tag="ru" />
+                                <ComboBoxItem Content="es-ES" Tag="es" />
+                                <ComboBoxItem Content="pt-BR" Tag="pt" />
+                                <ComboBoxItem Content="tr-TR" Tag="tr" />
+                                <ComboBoxItem Content="ar-SA" Tag="ar" />
+                            </ComboBox>
+                            <Button x:Name="TranslateApiSettingsButton" Height="27" Margin="0,6,0,0" Click="TranslateApiSettingsButton_Click">Open</Button>
+                            <TextBlock x:Name="CaptionDisplayModeLabel" Margin="2,7,0,2" Text="Display" />
+                            <RadioButton x:Name="DisplayOriginalRadio" Height="19" Content="Original" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
+                            <RadioButton x:Name="DisplayTranslatedRadio" Height="19" Content="Translated" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
+                            <RadioButton x:Name="DisplayBothRadio" Height="19" Content="Both" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="4" Style="{StaticResource SettingsGroupBorderStyle}">
+                        <StackPanel>
+                            <TextBlock x:Name="SettingsOverlayGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Overlay" />
+                            <TextBlock x:Name="OverlaySettingsLabel" Margin="2,0,0,4" Text="Overlay" />
+                            <Button x:Name="ResetOverlayButton" Height="28" Click="ResetOverlayButton_Click">Reset</Button>
+                            <Button x:Name="OverlayColorsButton" Height="27" Margin="0,6,0,0" Click="OverlayColorsButton_Click">Colors</Button>
+                            <TextBlock x:Name="CaptionDisplayLinesLabel" Margin="2,7,0,3" Text="Caption page lines" />
+                            <ComboBox x:Name="CaptionDisplayLinesBox" Height="28" SelectionChanged="ImmediateSetting_SelectionChanged">
+                                <ComboBoxItem Content="1" />
+                                <ComboBoxItem Content="2" />
+                                <ComboBoxItem Content="3" />
+                                <ComboBoxItem Content="5" />
+                                <ComboBoxItem Content="8" />
+                            </ComboBox>
+                            <TextBlock x:Name="OverlayDisplayLinesLabel" Margin="2,7,0,3" Text="Overlay lines" />
+                            <ComboBox x:Name="OverlayDisplayLinesBox" Height="28" SelectionChanged="ImmediateSetting_SelectionChanged">
+                                <ComboBoxItem Content="1" />
+                                <ComboBoxItem Content="2" />
+                                <ComboBoxItem Content="3" />
+                                <ComboBoxItem Content="5" />
+                                <ComboBoxItem Content="8" />
+                            </ComboBox>
+                            <TextBlock x:Name="OverlayOpacityLabel" Margin="2,7,0,3" Text="Opacity" />
+                            <Slider x:Name="OverlayOpacitySlider"
+                                    Minimum="0"
+                                    Maximum="100"
+                                    Value="100"
+                                    ValueChanged="ImmediateSetting_ValueChanged" />
+                            <CheckBox x:Name="OverlayClickThroughCheck"
+                                      Height="24"
+                                      Margin="0,6,0,0"
+                                      Content="Click through"
+                                      Checked="ImmediateSetting_CheckedChanged"
+                                      Unchecked="ImmediateSetting_CheckedChanged" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border x:Name="InfoPanel"
+                        Margin="6,6,15,5"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushSoft}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Visibility="Collapsed">
+                    <Grid Margin="12,9,12,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="6" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="6" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="InfoWelcomeText" Grid.Row="0" TextWrapping="Wrap" />
+                        <Border Grid.Row="2" Height="1" Background="{StaticResource BorderBrushSoft}" />
+                        <Grid Grid.Row="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.1*" />
+                                <ColumnDefinition Width="1.1*" />
+                                <ColumnDefinition Width="1*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="InfoLinksTitle" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,5,0,0">
+                                    <Run x:Name="InfoProjectLabelRun" FontWeight="SemiBold" />
+                                    <Run Text=" " />
+                                    <Hyperlink Click="ProjectLink_Click">
+                                        <Run Text="GitHub" />
+                                    </Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,3,0,0">
+                                    <Run x:Name="InfoReferenceLabelRun" FontWeight="SemiBold" />
+                                    <Run Text=" " />
+                                    <Hyperlink Click="ReferenceLink_Click">
+                                        <Run Text="LiveCaptions-Translator" />
+                                    </Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,3,0,0" TextWrapping="Wrap">
+                                    <Run x:Name="InfoAsrLabelRun" FontWeight="SemiBold" />
+                                    <Run Text=" " />
+                                    <Hyperlink Click="FasterWhisperLink_Click">
+                                        <Run Text="Faster-Whisper" />
+                                    </Hyperlink>
+                                    <Run Text=", " />
+                                    <Hyperlink Click="QwenAsrLink_Click">
+                                        <Run Text="Qwen3-ASR" />
+                                    </Hyperlink>
+                                    <Run Text=", " />
+                                    <Hyperlink Click="WhisperLiveKitLink_Click">
+                                        <Run Text="WhisperLiveKit" />
+                                    </Hyperlink>
+                                    <Run Text=", " />
+                                    <Hyperlink Click="WhisperXLink_Click">
+                                        <Run Text="WhisperX" />
+                                    </Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,3,0,0" TextWrapping="Wrap">
+                                    <Run x:Name="InfoDiarizationLabelRun" FontWeight="SemiBold" />
+                                    <Run Text=" " />
+                                    <Hyperlink Click="PyannoteLink_Click">
+                                        <Run Text="pyannote Community-1" />
+                                    </Hyperlink>
+                                    <Run Text=", " />
+                                    <Hyperlink Click="DiartLink_Click">
+                                        <Run Text="Diart" />
+                                    </Hyperlink>
+                                    <Run Text=", " />
+                                    <Hyperlink Click="SortformerLink_Click">
+                                        <Run Text="Sortformer" />
+                                    </Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,3,0,0">
+                                    <Run x:Name="InfoLicenseLabelRun" FontWeight="SemiBold" />
+                                    <Run Text=" " />
+                                    <Hyperlink Click="LicenseLink_Click">
+                                        <Run Text="Apache-2.0" />
+                                    </Hyperlink>
+                                </TextBlock>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                <TextBlock x:Name="InfoRuntimeTitle" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,5,0,0">
+                                    <Run x:Name="InfoVersionLabelRun" FontWeight="SemiBold" />
+                                    <Run x:Name="InfoVersionRun" />
+                                </TextBlock>
+                                <TextBlock Margin="0,3,0,0" TextWrapping="Wrap">
+                                    <Run x:Name="InfoRuntimeLabelRun" FontWeight="SemiBold" />
+                                    <Run x:Name="InfoRuntimeRun" />
+                                </TextBlock>
+                                <StackPanel Margin="0,6,0,0" Orientation="Horizontal">
+                                    <Button x:Name="OpenModelsFolderButton" Width="128" Height="26" Padding="0" Click="OpenModelsFolder_Click" />
+                                    <Button x:Name="OpenRuntimeFolderButton" Width="132" Height="26" Margin="8,0,0,0" Padding="0" Click="OpenRuntimeFolder_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Margin="16,0,0,0">
+                                <TextBlock x:Name="InfoDataTitle" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,5,0,0" TextWrapping="Wrap">
+                                    <Run x:Name="InfoStorageLabelRun" FontWeight="SemiBold" />
+                                    <Run x:Name="InfoStorageRun" />
+                                </TextBlock>
+                                <TextBlock x:Name="InfoPrivacyText" Margin="0,5,0,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="ConsolePanel"
+                        Margin="6,6,15,5"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushSoft}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Visibility="Collapsed">
+                    <Grid Margin="10,8,10,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="24" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0">
+                            <TextBlock x:Name="ConsoleTitleText" VerticalAlignment="Center" FontWeight="SemiBold" Text="Python Console" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <Button x:Name="ConsoleClearButton"
+                                        Width="88"
+                                        Height="24"
+                                        Padding="0"
+                                        Click="ConsoleClearButton_Click"
+                                        Content="Clear logs" />
+                                <ToggleButton x:Name="ConsoleKeepBottomButton"
+                                              Width="96"
+                                              Height="24"
+                                              Margin="6,0,0,0"
+                                              Padding="0"
+                                              Style="{StaticResource ConsoleKeepBottomButtonStyle}"
+                                              Click="ConsoleKeepBottomButton_Click"
+                                              Content="Keep bottom" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBox x:Name="ConsoleTextBox"
+                                 Grid.Row="1"
+                                 Margin="0,6,0,0"
+                                 FontFamily="Consolas"
+                                 FontSize="11"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 VerticalScrollBarVisibility="Auto" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,128 @@
+<Window x:Class="LiveDialogueTranslator.App.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:LiveDialogueTranslator.App"
+        Title="Speaker Caption Overlay"
+        Width="650"
+        Height="135"
+        MinWidth="420"
+        MinHeight="95"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStyle="None"
+        MouseEnter="Window_MouseEnter"
+        MouseLeave="Window_MouseLeave"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+    <Window.Resources>
+        <local:FontSizeToLineHeightConverter x:Key="FontSizeToLineHeightConverter" />
+        <local:LineLimitHeightConverter x:Key="LineLimitHeightConverter" />
+    </Window.Resources>
+    <Border x:Name="OverlayFrame"
+            Margin="5"
+            Padding="14"
+            CornerRadius="8"
+            BorderBrush="#33FFFFFF"
+            BorderThickness="1"
+            Background="#FF000000">
+        <Grid>
+            <ItemsControl x:Name="OverlaySpeakers">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,3">
+                            <Grid.Style>
+                                <Style TargetType="Grid">
+                                    <Setter Property="Opacity" Value="1" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFading}" Value="True">
+                                            <DataTrigger.EnterActions>
+                                                <BeginStoryboard>
+                                                    <Storyboard>
+                                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                         To="0"
+                                                                         Duration="0:0:0.65" />
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </DataTrigger.EnterActions>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Grid.Style>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="96" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Foreground="{Binding SpeakerBrush}"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="{Binding SpeakerName}" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock local:SegmentedTextBlockBehavior.Segments="{Binding OriginalSegments}"
+                                           local:SegmentedTextBlockBehavior.MaxVisualLines="{Binding LinesPerSpeaker}"
+                                           ClipToBounds="True"
+                                           TextWrapping="Wrap">
+                                    <TextBlock.MaxHeight>
+                                        <MultiBinding Converter="{StaticResource LineLimitHeightConverter}">
+                                            <Binding Path="LinesPerSpeaker" />
+                                            <Binding RelativeSource="{RelativeSource Self}" Path="FontSize" />
+                                        </MultiBinding>
+                                    </TextBlock.MaxHeight>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding OriginalDisplayText}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Margin="0,4,0,0"
+                                           local:SegmentedTextBlockBehavior.Segments="{Binding TranslationSegments}"
+                                           local:SegmentedTextBlockBehavior.MaxVisualLines="{Binding LinesPerSpeaker}"
+                                           ClipToBounds="True"
+                                           TextWrapping="Wrap">
+                                    <TextBlock.MaxHeight>
+                                        <MultiBinding Converter="{StaticResource LineLimitHeightConverter}">
+                                            <Binding Path="LinesPerSpeaker" />
+                                            <Binding RelativeSource="{RelativeSource Self}" Path="FontSize" />
+                                        </MultiBinding>
+                                    </TextBlock.MaxHeight>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding TranslatedDisplayText}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <StackPanel x:Name="ControlPanel" HorizontalAlignment="Right" VerticalAlignment="Bottom" Orientation="Horizontal" Visibility="Collapsed">
+                <Button x:Name="FontIncreaseButton" Width="34" Height="28" Margin="3,0" Padding="0" Click="FontIncrease_Click" ToolTip="Font size increase">A+</Button>
+                <Button x:Name="FontDecreaseButton" Width="34" Height="28" Margin="3,0" Padding="0" Click="FontDecrease_Click" ToolTip="Font size decrease">A-</Button>
+                <Button x:Name="BorderToggleButton" Width="50" Height="28" Margin="3,0" Padding="0" Click="BorderToggle_Click" ToolTip="Border">Border</Button>
+                <Slider x:Name="OverlayOpacityControlSlider"
+                        Width="90"
+                        Height="28"
+                        Margin="5,0,3,0"
+                        VerticalAlignment="Center"
+                        Minimum="0"
+                        Maximum="100"
+                        Value="100"
+                        ValueChanged="OverlayOpacityControlSlider_ValueChanged"
+                        ToolTip="Opacity" />
+                <Button x:Name="OverlayResetButton" Width="42" Height="28" Margin="3,0" Padding="0" Click="OverlayResetButton_Click" ToolTip="Reset">Reset</Button>
+                <Button x:Name="ClickThroughButton" Width="42" Height="28" Margin="3,0" Padding="0" Click="ClickThrough_Click" ToolTip="Click through">Lock</Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

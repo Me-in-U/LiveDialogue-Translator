@@ -1,0 +1,80 @@
+<Window x:Class="LiveDialogueTranslator.App.OverlayColorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Overlay Colors"
+        Width="560"
+        Height="352"
+        MinWidth="520"
+        MinHeight="330"
+        Background="{StaticResource WindowBrush}"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TitleText" Grid.Row="0" FontSize="20" FontWeight="SemiBold" Text="Overlay Colors" />
+
+        <Border Grid.Row="2"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrushSoft}"
+                BorderThickness="1"
+                CornerRadius="6">
+            <Grid Margin="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="210" />
+                    <ColumnDefinition Width="150" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="28" />
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="34" />
+                    <RowDefinition Height="34" />
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="RoleHeaderText" Grid.Row="0" Grid.Column="0" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" Text="Role" />
+                <TextBlock x:Name="ValueHeaderText" Grid.Row="0" Grid.Column="1" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" Text="Color" />
+                <TextBlock x:Name="PreviewHeaderText" Grid.Row="0" Grid.Column="2" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" Text="Preview" />
+
+                <TextBlock x:Name="ActiveSpeakerLabel" Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="Active speaker" />
+                <TextBox x:Name="ActiveSpeakerColorBox" Grid.Row="1" Grid.Column="1" Height="26" VerticalAlignment="Center" TextChanged="ColorBox_TextChanged" />
+                <Border x:Name="ActiveSpeakerSwatch" Grid.Row="1" Grid.Column="2" Width="72" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="3" />
+
+                <TextBlock x:Name="InactiveSpeakerLabel" Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Inactive speaker" />
+                <TextBox x:Name="InactiveSpeakerColorBox" Grid.Row="2" Grid.Column="1" Height="26" VerticalAlignment="Center" TextChanged="ColorBox_TextChanged" />
+                <Border x:Name="InactiveSpeakerSwatch" Grid.Row="2" Grid.Column="2" Width="72" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="3" />
+
+                <TextBlock x:Name="ActiveOriginalLabel" Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Active original" />
+                <TextBox x:Name="ActiveOriginalColorBox" Grid.Row="3" Grid.Column="1" Height="26" VerticalAlignment="Center" TextChanged="ColorBox_TextChanged" />
+                <Border x:Name="ActiveOriginalSwatch" Grid.Row="3" Grid.Column="2" Width="72" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="3" />
+
+                <TextBlock x:Name="ActiveTranslationLabel" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" Text="Active translation" />
+                <TextBox x:Name="ActiveTranslationColorBox" Grid.Row="4" Grid.Column="1" Height="26" VerticalAlignment="Center" TextChanged="ColorBox_TextChanged" />
+                <Border x:Name="ActiveTranslationSwatch" Grid.Row="4" Grid.Column="2" Width="72" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="3" />
+
+                <TextBlock x:Name="InactiveOriginalLabel" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" Text="Inactive original" />
+                <TextBox x:Name="InactiveOriginalColorBox" Grid.Row="5" Grid.Column="1" Height="26" VerticalAlignment="Center" TextChanged="ColorBox_TextChanged" />
+                <Border x:Name="InactiveOriginalSwatch" Grid.Row="5" Grid.Column="2" Width="72" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="3" />
+
+                <TextBlock x:Name="InactiveTranslationLabel" Grid.Row="6" Grid.Column="0" VerticalAlignment="Center" Text="Inactive translation" />
+                <TextBox x:Name="InactiveTranslationColorBox" Grid.Row="6" Grid.Column="1" Height="26" VerticalAlignment="Center" TextChanged="ColorBox_TextChanged" />
+                <Border x:Name="InactiveTranslationSwatch" Grid.Row="6" Grid.Column="2" Width="72" Height="20" HorizontalAlignment="Left" VerticalAlignment="Center" BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="1" CornerRadius="3" />
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal">
+            <Button x:Name="ResetDefaultsButton" Width="96" Height="30" Margin="0,0,8,0" Click="ResetDefaultsButton_Click">Defaults</Button>
+            <Button x:Name="CancelButton" Width="86" Height="30" Margin="0,0,8,0" Click="CancelButton_Click">Cancel</Button>
+            <Button x:Name="SaveButton" Width="86" Height="30" Click="SaveButton_Click">Save</Button>
+        </StackPanel>
+    </Grid>
+</Window>
