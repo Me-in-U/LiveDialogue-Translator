@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible problem in LiveDialogue Translator
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include Hugging Face tokens, API keys, or private logs with credentials.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App version, release tag, or commit.
+      placeholder: v1.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Audio capture
+        - ASR/STT
+        - Speaker diarization
+        - Translation
+        - Overlay
+        - Installer/runtime setup
+        - UI/settings
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest sequence that reproduces the issue.
+      placeholder: |
+        1. Start capture with ...
+        2. Select ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs with secrets redacted.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Windows version, CPU/GPU, CUDA availability, audio device type
+    validations:
+      required: false
