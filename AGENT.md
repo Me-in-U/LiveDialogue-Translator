@@ -5,10 +5,16 @@
 Use `Major.Minor.Patch`.
 
 - `Major`: platform-wide changes, architecture-wide rewrites, breaking changes, or very large feature sets.
-- `Minor`: add exactly one user-facing feature or one coherent feature area.
-- `Patch`: fix exactly one bug or one tightly scoped defect.
+- `Minor`: one feature release. It may contain multiple accepted user-facing features that were integrated through `develop`.
+- `Patch`: already-released version hotfix. It may contain one or more tightly related bug, security, packaging, or runtime fixes, but no new user-facing feature.
 
-Version bumps must match the release scope. Do not group multiple unrelated features into one minor bump or multiple unrelated bug fixes into one patch bump unless the user explicitly asks for a bundled release.
+Version bumps must match the release scope. Do not use a patch release for new functionality. Do not change the final version only because stabilization fixes land in beta before the release is published.
+
+Decide the release version when cutting a beta branch from `develop`:
+
+- If the release contains new user-facing functionality, use the next minor version.
+- If the release is only a hotfix for an already published release, use the next patch version.
+- If beta scope grows beyond the chosen version meaning, either move the extra work back to `develop` or cut a new correctly named beta branch.
 
 For this app, keep all release version surfaces in sync:
 
@@ -39,12 +45,14 @@ Release notes should include:
 
 `main` is the release branch. Use it only for final release integration.
 
-Development for the next release happens on a versioned beta branch:
+`develop` is the ongoing integration branch for the next release. Feature and normal fix work starts from `develop` and returns to `develop`.
+
+When `develop` is stable enough to prepare a release, create a versioned beta branch from `develop`:
 
 - Format: `v<Major>.<Minor>.<Patch>-beta`
-- Example: `v1.1.0-beta`
+- Example: `v1.2.0-beta`
 
-Feature and fix branches must branch from the current beta branch, not from `main`.
+Feature and normal fix branches must branch from `develop`, not from `main` or beta.
 
 - Feature branch format: `feature/<short-kebab-name>`
 - Bug fix branch format: `fix/<short-kebab-name>`
@@ -55,19 +63,26 @@ Do not use personal, tool, or automation prefixes in branch names. In particular
 
 Flow:
 
-1. Create or update the target beta branch from the latest stable release point.
-2. Branch feature/fix work from the beta branch.
-3. Merge completed feature/fix branches back into the beta branch after verification.
-4. Stabilize and test on the beta branch.
-5. When release-ready, open the final PR from the beta branch to `main`.
-6. After `main` receives the release, tag it as `v<Major>.<Minor>.<Patch>` and publish the release artifact.
+1. Keep `main` at the latest stable release.
+2. Keep `develop` as the shared integration branch for the next release.
+3. Branch feature/fix work from `develop`.
+4. Merge completed feature/fix branches back into `develop` after review and verification.
+5. When `develop` is stable enough for release preparation, cut `v<Major>.<Minor>.<Patch>-beta` from `develop`.
+6. On beta, allow only stabilization work: bug fixes, docs, packaging, dependency lock fixes, release notes, and verification changes.
+7. If a beta stabilization fix also applies to future development, merge or cherry-pick it back to `develop`.
+8. When beta is final-stable, open the release PR from beta to `main`.
+9. After `main` receives the release, tag it as `v<Major>.<Minor>.<Patch>` and publish the release artifact.
+10. Sync the released `main` state back into `develop` so future work starts from the released baseline.
+
+Do not add new feature scope directly to beta. New feature work after beta cut goes to `develop` for the next release.
 
 After a branch is merged or no longer needed, delete both local and remote copies.
 
 Branch cleanup rules:
 
+- Never delete `main` or `develop`.
 - Delete completed feature/fix branches after they are merged.
-- Delete obsolete beta branches after the release is promoted, unless the user explicitly wants to keep them.
+- Delete obsolete beta branches after the release is promoted to `main`, unless the user explicitly wants to keep them.
 - Delete plan-only branches after the plan has been implemented or superseded.
 - Run `git fetch --prune origin` after remote branch deletion.
 - Verify remaining local and remote branches with `git branch --all --verbose` and `git ls-remote --heads origin`.
@@ -77,10 +92,14 @@ Branch cleanup rules:
 `main` should stay clean, linear, and release-oriented.
 
 - Do not commit experimental work directly to `main`.
+- Do not use `main` as a feature integration branch.
+- Do not merge feature/fix branches directly into `main`; merge them through `develop`, then beta, then release to `main`.
 - Do not merge planning-only branches into `main`.
 - Do not leave merge commits that only expose temporary branch names.
-- Prefer rebase, squash, or fast-forward history for beta and release preparation.
+- Prefer rebase, squash, or fast-forward history for develop, beta, and release preparation when it keeps history clearer.
 - Only force-push `main` when explicitly requested and after verifying the target commit.
+
+Before cutting beta from `develop`, verify the relevant feature/fix test suites.
 
 Before promoting beta to `main`, verify:
 
@@ -288,9 +307,13 @@ Keep unrelated work out of the commit. Before staging, inspect `git status --sho
 
 ## Pull Request Rules
 
-Feature and fix PRs target the current beta branch.
+Feature and normal fix PRs target `develop`.
 
-Release PRs target `main`.
+Beta stabilization PRs target the current `v<Major>.<Minor>.<Patch>-beta` branch.
+
+Release PRs target `main` and must come from the beta branch.
+
+Emergency hotfix PRs target `main`, then the fix must be merged or cherry-picked back to `develop`.
 
 PR titles should name the version or feature directly and must not include temporary branch names or tool prefixes.
 
