@@ -7,6 +7,7 @@ import json
 import math
 import os
 import base64
+import subprocess
 import threading
 import time
 from array import array
@@ -83,6 +84,32 @@ class WorkerCacheTests(unittest.TestCase):
                     os.environ.pop(name, None)
                 else:
                     os.environ[name] = value
+
+    def test_speaker_worker_imports_support_modules_without_worker_on_sys_path(self) -> None:
+        code = """
+import importlib.util
+import sys
+from pathlib import Path
+
+worker = Path("worker/speaker_worker.py").resolve()
+worker_dir = str(worker.parent)
+sys.path = [entry for entry in sys.path if str(Path(entry or ".").resolve()) != worker_dir]
+spec = importlib.util.spec_from_file_location("isolated_speaker_worker", worker)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+print("ok")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("ok", result.stdout)
 
     def test_stream_worker_flushes_after_sensitive_preset_chunk(self) -> None:
         calls = []
@@ -711,7 +738,7 @@ class WorkerCacheTests(unittest.TestCase):
             else:
                 os.environ["HF_TOKEN"] = original_token
 
-        self.assertEqual([("hf_test", Path("models") / "diart", "cpu", 50, 2, 5.0, 0.5, 2.0, {"tau_active": 0.555, "rho_update": 0.422, "delta_new": 1.517})], calls)
+        self.assertEqual([("hf_test", Path("models") / "diart", "cpu", 50, 2, 6.0, 0.5, 2.0, {"tau_active": 0.555, "rho_update": 0.422, "delta_new": 1.517})], calls)
         self.assertEqual("diart", engine.diarization_pipeline)
         self.assertTrue(any(event["stage"] == "diarization_loaded" and "Diart" in event["message"] for event in events))
 
@@ -948,6 +975,14 @@ class WorkerCacheTests(unittest.TestCase):
         self.assertEqual({"tau_active": 0.555, "rho_update": 0.422, "delta_new": 1.517}, speaker_worker.diart_hyper_parameters_for_quality(0))
         self.assertEqual({"tau_active": 0.555, "rho_update": 0.422, "delta_new": 1.517}, speaker_worker.diart_hyper_parameters_for_quality(50))
         self.assertEqual({"tau_active": 0.555, "rho_update": 0.422, "delta_new": 1.517}, speaker_worker.diart_hyper_parameters_for_quality(100))
+
+    def test_diart_quality_presets_increase_duration_for_stability(self) -> None:
+        self.assertEqual(5.0, speaker_worker.diart_duration_seconds_for_quality(0))
+        self.assertEqual(6.0, speaker_worker.diart_duration_seconds_for_quality(50))
+        self.assertEqual(8.0, speaker_worker.diart_duration_seconds_for_quality(100))
+
+    def test_diart_quality_presets_keep_fast_step(self) -> None:
+        self.assertEqual(0.5, speaker_worker.DIART_STREAM_CHUNK_SECONDS)
 
     def test_qwen_diarization_uses_four_second_chunks_even_in_sensitive_mode(self) -> None:
         engine = speaker_worker.LocalSpeechEngine(Path("models"))
@@ -1818,7 +1853,7 @@ class WorkerCacheTests(unittest.TestCase):
 
         captions = [event for event in events if event.get("type") == "final_caption"]
         self.assertEqual(1, len(captions))
-        self.assertEqual("speaker_2", captions[0]["speakerId"])
+        self.assertEqual("speaker_1", captions[0]["speakerId"])
         self.assertEqual("정상 출력", captions[0]["text"])
 
     def test_whisperlivekit_sortformer_reuses_streaming_session_between_chunks(self) -> None:
@@ -1914,7 +1949,7 @@ class WorkerCacheTests(unittest.TestCase):
         self.assertEqual(1, len(captions))
         self.assertEqual("speaker_2", captions[0]["speakerId"])
 
-    def test_whisperlivekit_sortformer_uses_last_streaming_speaker_when_overlap_is_not_ready(self) -> None:
+    def test_whisperlivekit_sortformer_uses_external_label_when_overlap_is_not_ready(self) -> None:
         events = []
 
         class FakeWhisperLiveKitSession:
@@ -1958,7 +1993,7 @@ class WorkerCacheTests(unittest.TestCase):
 
         captions = [event for event in events if event.get("type") == "final_caption"]
         self.assertEqual(1, len(captions))
-        self.assertEqual("speaker_3", captions[0]["speakerId"])
+        self.assertEqual("speaker_1", captions[0]["speakerId"])
 
     def test_whisperlivekit_sortformer_failure_does_not_fall_back_to_bool_whisper(self) -> None:
         events = []
@@ -2771,7 +2806,7 @@ class WorkerCacheTests(unittest.TestCase):
         finally:
             speaker_worker.pcm_to_waveform = original
 
-        self.assertEqual([{"min_speakers": 1, "max_speakers": 2}], calls)
+        self.assertEqual([{"min_speakers": 2, "max_speakers": 2}], calls)
 
     def test_speaker_for_keeps_exact_speaker_count_as_range_after_context_warmup(self) -> None:
         calls = []
@@ -2797,7 +2832,15 @@ class WorkerCacheTests(unittest.TestCase):
         finally:
             speaker_worker.pcm_to_waveform = original
 
-        self.assertEqual([{"min_speakers": 1, "max_speakers": 2}], calls)
+        self.assertEqual([{"min_speakers": 2, "max_speakers": 2}], calls)
+
+    def test_exact_speakers_passes_fixed_min_and_max_to_pyannote(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.exact_speakers = 3
+        engine.config.max_speakers = 8
+        engine.config.diarization_model = "pyannote_community"
+
+        self.assertEqual({"min_speakers": 3, "max_speakers": 3}, engine._diarization_speaker_kwargs(30.0))
 
     def test_transcribe_uses_rolling_audio_context_for_diarization(self) -> None:
         calls = []
@@ -3294,6 +3337,22 @@ class WorkerCacheTests(unittest.TestCase):
         self.assertEqual(speaker_worker.BYTES_PER_SECOND, calls[0])
         self.assertEqual(speaker_worker.BYTES_PER_SECOND * 2, calls[1])
 
+    def test_append_streaming_segment_merges_and_prunes_cached_turns(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+
+        engine.append_streaming_segment("system", 0, 1000, "speaker_1")
+        engine.append_streaming_segment("system", 1100, 2000, "speaker_1")
+        engine.append_streaming_segment("system", 2400, 3000, "speaker_1")
+        engine.append_streaming_segment("system", 602_000, 603_001, "speaker_2")
+
+        self.assertEqual([(602_000, 603_001, "speaker_2")], engine.streaming_diarization_segments["system"])
+
+        for index in range(405):
+            start_ms = 604_000 + (index * 1_000)
+            engine.append_streaming_segment("system", start_ms, start_ms + 500, f"speaker_{index % 2}")
+
+        self.assertLessEqual(len(engine.streaming_diarization_segments["system"]), 400)
+
     def test_select_current_speaker_label_ignores_subsecond_tail_blips(self) -> None:
         class Segment:
             def __init__(self, start, end):
@@ -3500,6 +3559,126 @@ class WorkerCacheTests(unittest.TestCase):
             self.assertTrue(materialized)
             self.assertFalse(link.is_symlink())
             self.assertEqual("config", link.read_text(encoding="utf-8"))
+
+    def test_speaker_registry_reuses_matching_active_slot(self) -> None:
+        from diarization_state import SpeakerCountPolicy, SpeakerObservation, SpeakerSlotRegistry
+
+        registry = SpeakerSlotRegistry(SpeakerCountPolicy(mode="active_max", max_speakers=3))
+        first = registry.assign(SpeakerObservation(label="A", start_ms=0, end_ms=2000, embedding=[1.0, 0.0]))
+        second = registry.assign(SpeakerObservation(label="A2", start_ms=3000, end_ms=5000, embedding=[0.98, 0.02]))
+
+        self.assertEqual("speaker_1", first.speaker_id)
+        self.assertEqual("speaker_1", second.speaker_id)
+
+    def test_speaker_registry_replaces_inactive_slot_in_active_max_mode(self) -> None:
+        from diarization_state import SpeakerCountPolicy, SpeakerObservation, SpeakerSlotRegistry
+
+        registry = SpeakerSlotRegistry(SpeakerCountPolicy(mode="active_max", max_speakers=2, inactive_after_ms=10_000))
+        registry.assign(SpeakerObservation(label="A", start_ms=0, end_ms=2000, embedding=[1.0, 0.0]))
+        registry.assign(SpeakerObservation(label="B", start_ms=1000, end_ms=3000, embedding=[0.0, 1.0]))
+        assigned = registry.assign(SpeakerObservation(label="C", start_ms=20_000, end_ms=22_000, embedding=[-1.0, 0.0]))
+
+        self.assertEqual("speaker_1", assigned.speaker_id)
+        self.assertEqual("replaced_inactive", assigned.reason)
+
+    def test_speaker_registry_does_not_replace_in_exact_mode(self) -> None:
+        from diarization_state import SpeakerCountPolicy, SpeakerObservation, SpeakerSlotRegistry, UNKNOWN_SPEAKER_ID
+
+        registry = SpeakerSlotRegistry(SpeakerCountPolicy(mode="exact", max_speakers=2, exact_speakers=2, inactive_after_ms=10_000))
+        registry.assign(SpeakerObservation(label="A", start_ms=0, end_ms=2000, embedding=[1.0, 0.0]))
+        registry.assign(SpeakerObservation(label="B", start_ms=1000, end_ms=3000, embedding=[0.0, 1.0]))
+        assigned = registry.assign(SpeakerObservation(label="C", start_ms=20_000, end_ms=22_000, embedding=[-1.0, 0.0]))
+
+        self.assertEqual(UNKNOWN_SPEAKER_ID, assigned.speaker_id)
+        self.assertEqual("exact_pool_full", assigned.reason)
+
+    def test_worker_active_max_replaces_inactive_speaker_slot(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "legacy"
+        engine.config.max_speakers = 2
+        engine.config.exact_speakers = None
+        engine.config.speaker_count_mode = "active_max"
+        engine.reset_speaker_state()
+
+        first = engine._speaker_id_for_embedding("system", "A", [1.0, 0.0], 0, 2000)
+        second = engine._speaker_id_for_embedding("system", "B", [0.0, 1.0], 1000, 3000)
+        pending = engine._speaker_id_for_embedding("system", "C", [-1.0, 0.0], 20_000, 22_000)
+        replacement = engine._speaker_id_for_embedding("system", "C", [-0.99, 0.01], 22_500, 24_500)
+
+        self.assertEqual("speaker_1", first)
+        self.assertEqual("speaker_2", second)
+        self.assertEqual("speaker_unknown", pending)
+        self.assertEqual("speaker_1", replacement)
+
+    def test_diart_uses_streaming_speaker_policy(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "diart"
+        engine.config.max_speakers = 4
+        engine.config.exact_speakers = None
+        engine.config.speaker_count_mode = "active_max"
+
+        policy = engine._speaker_count_policy()
+
+        self.assertEqual("active_max", policy.mode)
+        self.assertEqual(60_000, policy.inactive_after_ms)
+        self.assertEqual(15_000, policy.protected_after_ms)
+        self.assertEqual(2, policy.pending_confirmations)
+        self.assertEqual(0.12, policy.embedding_update_rate)
+
+    def test_sortformer_external_labels_are_smoothed_by_registry(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "sortformer"
+        engine.config.max_speakers = 4
+        engine.config.exact_speakers = None
+        engine.config.speaker_count_mode = "active_max"
+        engine.reset_speaker_state()
+
+        first = engine._speaker_id_for_external_label("system", "SORTFORMER_0", 0, 2000)
+        second = engine._speaker_id_for_external_label("system", "SORTFORMER_0", 2500, 4500)
+
+        self.assertEqual("speaker_1", first)
+        self.assertEqual("speaker_1", second)
+
+    def test_sortformer_uses_external_label_smoothing_policy(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "sortformer"
+        engine.config.max_speakers = 4
+        engine.config.exact_speakers = None
+        engine.config.speaker_count_mode = "active_max"
+
+        policy = engine._speaker_count_policy()
+
+        self.assertEqual("active_max", policy.mode)
+        self.assertEqual(45_000, policy.inactive_after_ms)
+        self.assertEqual(10_000, policy.protected_after_ms)
+        self.assertEqual(3, policy.pending_confirmations)
+
+    def test_pyannote_active_max_uses_conservative_speaker_policy(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "pyannote_community"
+        engine.config.max_speakers = 4
+        engine.config.exact_speakers = None
+        engine.config.speaker_count_mode = "active_max"
+
+        policy = engine._speaker_count_policy()
+
+        self.assertEqual("active_max", policy.mode)
+        self.assertEqual(120_000, policy.inactive_after_ms)
+        self.assertEqual(1, policy.pending_confirmations)
+        self.assertEqual(0.10, policy.embedding_update_rate)
+
+    def test_pyannote_exact_mode_marks_out_of_pool_voice_unknown(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "pyannote_community"
+        engine.config.exact_speakers = 2
+        engine.config.max_speakers = 2
+        engine.reset_speaker_state()
+
+        engine._speaker_id_for_embedding("system", "A", [1.0, 0.0], 0, 2000)
+        engine._speaker_id_for_embedding("system", "B", [0.0, 1.0], 1000, 3000)
+        assigned = engine._speaker_id_for_embedding("system", "C", [-1.0, 0.0], 4000, 6000)
+
+        self.assertEqual("speaker_unknown", assigned)
 
 
 if __name__ == "__main__":

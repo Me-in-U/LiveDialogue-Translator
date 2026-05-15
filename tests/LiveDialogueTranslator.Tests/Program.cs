@@ -10,11 +10,13 @@ var tests = new (string Name, Action Body)[]
 {
     ("worker protocol serializes configure commands as json lines", WorkerProtocolSerializesConfigureCommand),
     ("worker protocol serializes exact speaker count", WorkerProtocolSerializesExactSpeakerCount),
+    ("worker protocol serializes speaker count mode", WorkerProtocolSerializesSpeakerCountMode),
     ("worker protocol serializes diarization model", WorkerProtocolSerializesDiarizationModel),
     ("worker protocol serializes ASR engine", WorkerProtocolSerializesAsrEngine),
     ("worker protocol serializes manual diart tuning", WorkerProtocolSerializesManualDiartTuning),
     ("worker protocol parses final captions with speaker and latency", WorkerProtocolParsesFinalCaption),
     ("speaker names prefer manual rename over generated label", SpeakerNamesPreferManualRename),
+    ("speaker names display unknown speaker", SpeakerNamesDisplayUnknownSpeaker),
     ("caption merger overwrites same speaker partial before final", CaptionMergerOverwritesPartial),
     ("caption merger preserves partial id while same speaker text updates", CaptionMergerPreservesPartialIdWhileSameSpeakerTextUpdates),
     ("caption merger appends adjacent final text from same speaker", CaptionMergerAppendsAdjacentFinalTextFromSameSpeaker),
@@ -30,6 +32,7 @@ var tests = new (string Name, Action Body)[]
     ("project links expose all speech backend pages", ProjectLinksExposeAllSpeechBackendPages),
     ("installer shows apache license", InstallerShowsApacheLicense),
     ("installer uses korean wizard language", InstallerUsesKoreanWizardLanguage),
+    ("release version is 1.1.0", ReleaseVersionIs110),
     ("main window exposes project and license info links", MainWindowExposesProjectAndLicenseInfoLinks),
     ("main window info page lists all speech backends", MainWindowInfoPageListsAllSpeechBackends),
     ("hugging face token guidance names required permission", HuggingFaceTokenGuidanceNamesRequiredPermission),
@@ -42,6 +45,7 @@ var tests = new (string Name, Action Body)[]
     ("python process environment uses utf8 and plain pip output", PythonProcessEnvironmentUsesUtf8AndPlainPipOutput),
     ("worker stderr classifier ignores benign gpu library warnings", WorkerStderrClassifierIgnoresBenignGpuLibraryWarnings),
     ("worker client filters benign stderr warnings", WorkerClientFiltersBenignStderrWarnings),
+    ("app publish includes worker support modules", AppPublishIncludesWorkerSupportModules),
     ("caption page uses overlay-style speaker card", CaptionPageUsesOverlayStyleSpeakerCard),
     ("caption page removes inactive speakers", CaptionPageRemovesInactiveSpeakers),
     ("caption speaker label columns stay compact", CaptionSpeakerLabelColumnsStayCompact),
@@ -72,6 +76,7 @@ var tests = new (string Name, Action Body)[]
     ("main window exposes whisper stt language selection", MainWindowExposesWhisperSttLanguageSelection),
     ("main window separates asr engine and model choices", MainWindowSeparatesAsrEngineAndModelChoices),
     ("main window exposes speaker count radios", MainWindowExposesSpeakerCountRadios),
+    ("main window exposes speaker count mode options", MainWindowExposesSpeakerCountModeOptions),
     ("main window deselects diarization for one speaker", MainWindowDeselectsDiarizationForOneSpeaker),
     ("main window separates asr and diarization presets", MainWindowSeparatesAsrAndDiarizationPresets),
     ("main window exposes stt scenario preset radios", MainWindowExposesSttScenarioPresetRadios),
@@ -88,6 +93,7 @@ var tests = new (string Name, Action Body)[]
     ("main window stops capture on fatal worker error", MainWindowStopsCaptureOnFatalWorkerError),
     ("worker environment skips local diarization package installs for whisperlivekit", WorkerEnvironmentSkipsLocalDiarizationPackageInstallsForWhisperLiveKit),
     ("worker protocol no longer serializes stt engine selection", WorkerProtocolNoLongerSerializesSttEngineSelection),
+    ("settings store passes speaker count mode to worker configuration", SettingsStorePassesSpeakerCountModeToWorkerConfiguration),
     ("worker environment does not export stt engine to setup checks", WorkerEnvironmentDoesNotExportSttEngineToSetupChecks),
     ("settings model has no stt engine", SettingsModelHasNoSttEngine),
     ("ASR engine environment prioritizes sortformer dependency site", AsrEngineEnvironmentPrioritizesSortformerDependencySite),
@@ -188,6 +194,35 @@ static void WorkerProtocolSerializesExactSpeakerCount()
     Assert.Contains("\"maxSpeakers\":2", jsonLine);
     Assert.Contains("\"exactSpeakers\":2", jsonLine);
     Assert.Contains("\"sttLanguages\":[\"ko\",\"en\"]", jsonLine);
+}
+
+static void WorkerProtocolSerializesSpeakerCountMode()
+{
+    var command = WorkerProtocol.Configure(new WorkerConfiguration(
+        InputMode.SystemAndMic,
+        "small",
+        Array.Empty<string>(),
+        100,
+        ComputeMode.Auto,
+        true,
+        DiarizationModel.PyannoteCommunity,
+        4,
+        null,
+        true,
+        new Dictionary<string, string>(),
+        SpeakerCountMode: SpeakerCountMode.ActiveMax));
+
+    Assert.Contains("\"speakerCountMode\":\"active_max\"", WorkerProtocol.Serialize(command));
+}
+
+static void SettingsStorePassesSpeakerCountModeToWorkerConfiguration()
+{
+    var settings = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Models", "AppSettings.cs"));
+    var store = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "SettingsStore.cs"));
+
+    Assert.Contains("public SpeakerCountMode SpeakerCountMode", settings);
+    Assert.Contains("settings.SpeakerCountMode == SpeakerCountMode.Exact", store);
+    Assert.Contains("SpeakerCountMode: settings.SpeakerCountMode", store);
 }
 
 static void WorkerProtocolSerializesDiarizationModel()
@@ -319,6 +354,15 @@ static void SpeakerNamesPreferManualRename()
     Assert.Equal("You", names.DisplayName("mic"));
     Assert.Equal("Lilian", names.DisplayName("speaker_2"));
     Assert.Equal("Speaker 3", names.DisplayName("speaker_3"));
+}
+
+static void SpeakerNamesDisplayUnknownSpeaker()
+{
+    var names = new SpeakerNameMap(ResolvedAppLanguage.English);
+    Assert.Equal("Unknown speaker", names.DisplayName("speaker_unknown"));
+
+    var koreanNames = new SpeakerNameMap(ResolvedAppLanguage.Korean);
+    Assert.Equal("알 수 없는 화자", koreanNames.DisplayName("speaker_unknown"));
 }
 
 static void SpeakerNamesLocalizeGeneratedLabels()
@@ -576,6 +620,15 @@ static void InstallerUsesKoreanWizardLanguage()
     Assert.Contains("Description: \"{#MyAppName} 실행\"", installer);
 }
 
+static void ReleaseVersionIs110()
+{
+    var props = File.ReadAllText("Directory.Build.props");
+    var installer = File.ReadAllText(Path.Combine("installer", "LiveDialogueTranslator.iss"));
+
+    Assert.Contains("<Version>1.1.0</Version>", props);
+    Assert.Contains("#define MyAppVersion \"1.1.0\"", installer);
+}
+
 static void MainWindowExposesProjectAndLicenseInfoLinks()
 {
     var xaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml"));
@@ -793,6 +846,14 @@ static void WorkerClientFiltersBenignStderrWarnings()
 
     Assert.Contains("WorkerStderrClassifier.ShouldIgnore(message)", workerClient);
     Assert.Contains("FilterBenignStderr(await process.StandardError.ReadToEndAsync())", modelManager);
+}
+
+static void AppPublishIncludesWorkerSupportModules()
+{
+    var project = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "LiveDialogueTranslator.App.csproj"));
+
+    Assert.Contains("..\\..\\worker\\speaker_worker.py", project);
+    Assert.Contains("..\\..\\worker\\diarization_state.py", project);
 }
 
 static void CaptionPageUsesOverlayStyleSpeakerCard()
@@ -1233,6 +1294,25 @@ static void MainWindowExposesSpeakerCountRadios()
     Assert.Contains("SelectSpeakerCount(settings)", source);
 }
 
+static void MainWindowExposesSpeakerCountModeOptions()
+{
+    var xaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml"));
+    var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
+    var localizer = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
+
+    Assert.Contains("x:Name=\"SpeakerCountModePanel\"", xaml);
+    Assert.Contains("x:Name=\"SpeakerModeActiveMaxRadio\"", xaml);
+    Assert.Contains("x:Name=\"SpeakerModeExactRadio\"", xaml);
+    Assert.Contains("GroupName=\"SpeakerCountMode\"", xaml);
+    Assert.Contains("SelectedSpeakerCountMode()", source);
+    Assert.Contains("SelectSpeakerCountMode(settings.SpeakerCountMode);", source);
+    Assert.Contains("settings.SpeakerCountMode = SelectedSpeakerCountMode();", source);
+    Assert.Contains("settings.ExactSpeakers = settings.SpeakerCountMode == SpeakerCountMode.Exact ? settings.MaxSpeakers : null;", source);
+    Assert.Contains("SpeakerModeActiveMax", localizer);
+    Assert.Contains("SpeakerModeExact", localizer);
+    Assert.Contains("SpeakerModeHelp", localizer);
+}
+
 static void MainWindowDeselectsDiarizationForOneSpeaker()
 {
     var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
@@ -1323,7 +1403,7 @@ static void MainWindowExposesSpeakerRangeCountOptions()
     Assert.True(!xaml.Contains("Tag=\"exact:", StringComparison.Ordinal), "speaker count UI must use max-range options, not exact speaker forcing");
     Assert.Contains("SelectedSpeakerCountTag()", source);
     Assert.Contains("settings.ExactSpeakers = null;", store);
-    Assert.Contains("null,", store);
+    Assert.Contains("exactSpeakers,", store);
 }
 
 static void MainWindowExposesDiarizationModelOptions()

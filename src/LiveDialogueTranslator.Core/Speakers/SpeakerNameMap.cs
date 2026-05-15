@@ -37,6 +37,11 @@ public sealed class SpeakerNameMap
             return language == ResolvedAppLanguage.Korean ? "나" : "You";
         }
 
+        if (string.Equals(speakerId, "speaker_unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return language == ResolvedAppLanguage.Korean ? "알 수 없는 화자" : "Unknown speaker";
+        }
+
         if (names.TryGetValue(speakerId, out var displayName))
         {
             return displayName;

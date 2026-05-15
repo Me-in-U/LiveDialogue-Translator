@@ -213,6 +213,12 @@ public partial class MainWindow : Window
         OverlayClickThroughCheck.Content = L("ClickThrough");
         OverlayClickThroughCheck.ToolTip = L("ClickThroughHelp");
         SpeakersLabel.Text = L("Speakers");
+        SpeakerModeLabel.Text = L("SpeakerMode");
+        SpeakerModeActiveMaxRadio.Content = L("SpeakerModeActiveMax");
+        SpeakerModeExactRadio.Content = L("SpeakerModeExact");
+        SpeakerCountModePanel.ToolTip = L("SpeakerModeHelp");
+        SpeakerModeActiveMaxRadio.ToolTip = L("SpeakerModeHelp");
+        SpeakerModeExactRadio.ToolTip = L("SpeakerModeHelp");
         CaptionDisplayLinesLabel.Text = L("CaptionDisplayLines");
         OverlayDisplayLinesLabel.Text = L("OverlayDisplayLines");
         DiarizationLabel.Text = L("Diarization");
@@ -679,8 +685,8 @@ public partial class MainWindow : Window
 
     private string SpeakerDebugText()
     {
-        return settings.ExactSpeakers is > 0
-            ? LF("SpeakerExactDebug", settings.ExactSpeakers.Value)
+        return settings.SpeakerCountMode == SpeakerCountMode.Exact
+            ? LF("SpeakerExactDebug", settings.ExactSpeakers ?? settings.MaxSpeakers)
             : LF("SpeakerAutoDebug", settings.MaxSpeakers);
     }
 
@@ -1439,6 +1445,7 @@ public partial class MainWindow : Window
             SelectByTag(TargetLanguageBox, settings.TargetLanguage);
             SelectCaptionDisplayMode(settings.CaptionDisplayMode);
             SelectSpeakerCount(settings);
+            SelectSpeakerCountMode(settings.SpeakerCountMode);
             SelectByContent(CaptionDisplayLinesBox, settings.CaptionDisplayLines.ToString());
             SelectByContent(OverlayDisplayLinesBox, settings.OverlayDisplayLines.ToString());
             OverlayClickThroughCheck.IsChecked = settings.Overlay.ClickThrough;
@@ -1959,23 +1966,22 @@ public partial class MainWindow : Window
     private void SaveSpeakerCountFromUi()
     {
         var tag = SelectedSpeakerCountTag();
-        if (TryParseSpeakerCountTag(tag, out var exactSpeakers, out var maxSpeakers))
+        if (TryParseSpeakerCountTag(tag, out _, out var maxSpeakers))
         {
-            settings.ExactSpeakers = exactSpeakers;
             settings.MaxSpeakers = maxSpeakers;
-            return;
+        }
+        else if (int.TryParse(tag, out maxSpeakers))
+        {
+            settings.MaxSpeakers = maxSpeakers;
         }
 
-        if (int.TryParse(tag, out maxSpeakers))
-        {
-            settings.ExactSpeakers = null;
-            settings.MaxSpeakers = maxSpeakers;
-        }
+        settings.SpeakerCountMode = SelectedSpeakerCountMode();
+        settings.ExactSpeakers = settings.SpeakerCountMode == SpeakerCountMode.Exact ? settings.MaxSpeakers : null;
     }
 
     private static string SpeakerCountTag(AppSettings settings)
     {
-        return $"auto:{(settings.ExactSpeakers is > 0 ? settings.ExactSpeakers.Value : settings.MaxSpeakers)}";
+        return $"auto:{settings.MaxSpeakers}";
     }
 
     private void SelectSpeakerCount(AppSettings settings)
@@ -1998,6 +2004,17 @@ public partial class MainWindow : Window
             .OfType<RadioButton>()
             .FirstOrDefault(radio => radio.IsChecked == true)
             ?.Tag?.ToString() ?? "auto:4";
+    }
+
+    private SpeakerCountMode SelectedSpeakerCountMode()
+    {
+        return SpeakerModeExactRadio.IsChecked == true ? SpeakerCountMode.Exact : SpeakerCountMode.ActiveMax;
+    }
+
+    private void SelectSpeakerCountMode(SpeakerCountMode mode)
+    {
+        SpeakerModeExactRadio.IsChecked = mode == SpeakerCountMode.Exact;
+        SpeakerModeActiveMaxRadio.IsChecked = mode != SpeakerCountMode.Exact;
     }
 
     private int SelectedSpeakerCountMax()

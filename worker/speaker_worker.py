@@ -23,6 +23,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+WORKER_DIR = Path(__file__).resolve().parent
+if str(WORKER_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKER_DIR))
+
+from diarization_state import UNKNOWN_SPEAKER_ID, SpeakerCountPolicy, SpeakerObservation, SpeakerSlotRegistry
+
 
 def canonical_transcription_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text).casefold()
@@ -436,6 +442,11 @@ def normalize_asr_engine(value: Any) -> str:
     return "faster_whisper"
 
 
+def normalize_speaker_count_mode(value: Any) -> str:
+    mode = str(value or "active_max").strip().lower().replace("-", "_")
+    return mode if mode in {"active_max", "exact", "session_max"} else "active_max"
+
+
 def configure_huggingface_cache(models_dir: Path) -> None:
     cache_home = models_dir / "huggingface"
     hub_cache = cache_home / "hub"
@@ -457,6 +468,7 @@ class WorkerConfig:
     diarization_model: str = "pyannote_community"
     max_speakers: int = 6
     exact_speakers: int | None = None
+    speaker_count_mode: str = "active_max"
     show_latency: bool = True
     speaker_names: dict[str, str] = field(default_factory=dict)
     diart_manual_settings: bool = False
@@ -526,6 +538,7 @@ class LocalSpeechEngine:
         self.streaming_diarization_lock = threading.RLock()
         self.streaming_diarization_thread: threading.Thread | None = None
         self.streaming_diarization_pending: dict[str, list[Any]] = {}
+        self.speaker_registry = SpeakerSlotRegistry(self._speaker_count_policy())
 
     def configure(self, payload: dict[str, Any]) -> None:
         previous = self.config
@@ -543,6 +556,7 @@ class LocalSpeechEngine:
             diarization_model=normalize_diarization_model(payload.get("diarizationModel")),
             max_speakers=max(1, max_speakers),
             exact_speakers=exact_speakers,
+            speaker_count_mode=normalize_speaker_count_mode(payload.get("speakerCountMode")),
             show_latency=bool(payload.get("showLatency", True)),
             speaker_names=dict(payload.get("speakerNames", {})),
             diart_manual_settings=bool(payload.get("diartManualSettings", False)),
@@ -567,6 +581,7 @@ class LocalSpeechEngine:
             or previous.diarization_quality_preset != next_config.diarization_quality_preset
             or previous.max_speakers != next_config.max_speakers
             or previous.exact_speakers != next_config.exact_speakers
+            or previous.speaker_count_mode != next_config.speaker_count_mode
             or previous.diart_manual_settings != next_config.diart_manual_settings
             or previous.diart_duration_seconds != next_config.diart_duration_seconds
             or previous.diart_step_seconds != next_config.diart_step_seconds
@@ -598,21 +613,12 @@ class LocalSpeechEngine:
                 self.close_whisperlivekit_session()
             self.diarization_pipeline = None
             self.last_diarization_error = None
-        if stt_changed or diarization_changed:
-            self.speaker_ids.clear()
-            self.speaker_embeddings.clear()
-            self.diarization_buffers.clear()
-            self.pending_segment_speakers.clear()
-            self.pending_segment_counts.clear()
-            self.stable_segment_speakers.clear()
-            self.last_emitted_segment_speakers.clear()
-            self.last_diarization_speakers.clear()
-            self.streaming_diarization_segments.clear()
-            self.streaming_diarization_start_ms.clear()
-            self.streaming_diarization_pending.clear()
-            self.streaming_diarization_generation += 1
+        reset_speakers = stt_changed or diarization_changed
 
         self.config = next_config
+        if reset_speakers:
+            self.reset_speaker_state()
+
         speaker_count = f"speaker_cap={self.config.exact_speakers}" if self.config.exact_speakers else f"max_speakers={self.config.max_speakers}"
         language_message = ",".join(self.config.stt_languages) if self.config.stt_languages else "auto"
         context_message = "stream" if self._uses_streaming_diarization() else f"{self._diarization_context_seconds()}s"
@@ -629,6 +635,71 @@ class LocalSpeechEngine:
             "message": f"engine={self.config.asr_engine}, model={self.config.stt_model}, languages={language_message}, asr_quality={self.config.stt_quality_preset}, diarization_quality={self.config.diarization_quality_preset}, compute={self.config.compute_mode}, diarization={'on' if effective_diarization_enabled else 'off'}, diarization_model={effective_diarization_model}, context={context_message}, {speaker_count}{manual_diart_message}",
             "progress": None,
         })
+
+    def reset_speaker_state(self) -> None:
+        self.speaker_ids.clear()
+        self.speaker_embeddings.clear()
+        self.diarization_buffers.clear()
+        self.pending_segment_speakers.clear()
+        self.pending_segment_counts.clear()
+        self.stable_segment_speakers.clear()
+        self.last_emitted_segment_speakers.clear()
+        self.last_diarization_speakers.clear()
+        self.streaming_diarization_segments.clear()
+        self.streaming_diarization_start_ms.clear()
+        self.streaming_diarization_pending.clear()
+        self.streaming_diarization_generation += 1
+        self.speaker_registry = SpeakerSlotRegistry(self._speaker_count_policy())
+
+    def _speaker_count_policy(self) -> SpeakerCountPolicy:
+        mode = normalize_speaker_count_mode(
+            "exact" if self.config.exact_speakers else self.config.speaker_count_mode
+        )
+        if self.config.diarization_model == "pyannote_community":
+            return SpeakerCountPolicy(
+                mode=mode,
+                max_speakers=max(1, self.config.max_speakers),
+                exact_speakers=self.config.exact_speakers,
+                inactive_after_ms=120_000 if mode == "active_max" else 300_000,
+                pending_confirmations=1,
+                match_threshold=0.62,
+                strict_match_threshold=0.70,
+                unknown_similarity_threshold=0.50,
+                embedding_update_rate=0.10,
+            )
+        if self.config.diarization_model == "diart":
+            return SpeakerCountPolicy(
+                mode=mode,
+                max_speakers=max(1, self.config.max_speakers),
+                exact_speakers=self.config.exact_speakers,
+                inactive_after_ms=60_000,
+                protected_after_ms=15_000,
+                pending_confirmations=2,
+                match_threshold=0.64,
+                strict_match_threshold=0.72,
+                unknown_similarity_threshold=0.52,
+                embedding_update_rate=0.12,
+            )
+        if self.config.diarization_model == "sortformer":
+            return SpeakerCountPolicy(
+                mode=mode,
+                max_speakers=max(1, self.config.max_speakers),
+                exact_speakers=self.config.exact_speakers,
+                inactive_after_ms=45_000,
+                protected_after_ms=10_000,
+                pending_confirmations=3,
+                match_threshold=0.62,
+                strict_match_threshold=0.70,
+                unknown_similarity_threshold=0.52,
+                embedding_update_rate=0.15,
+            )
+        return SpeakerCountPolicy(
+            mode=mode,
+            max_speakers=max(1, self.config.max_speakers),
+            exact_speakers=self.config.exact_speakers,
+            inactive_after_ms=10_000,
+            pending_confirmations=2,
+        )
 
     def close_whisperlivekit_session(self) -> None:
         with self.whisperlivekit_session_lock:
@@ -889,9 +960,9 @@ class LocalSpeechEngine:
                 if relative_end <= relative_start:
                     continue
 
-                speaker_id = self._speaker_id_for_label(diarization, label, source)
                 start_ms = timestamp_ms + int(relative_start * 1000)
                 end_ms = timestamp_ms + int(relative_end * 1000)
+                speaker_id = self._speaker_id_for_label(diarization, label, source, start_ms, end_ms)
                 speaker_turns.append((start_ms, end_ms, speaker_id))
                 emit({
                     "type": "speaker_segment",
@@ -959,7 +1030,13 @@ class LocalSpeechEngine:
                 current_seconds=current_seconds,
             )
             if label:
-                self.last_diarization_speakers[source] = self._speaker_id_for_label(diarization, label, source)
+                self.last_diarization_speakers[source] = self._speaker_id_for_label(
+                    diarization,
+                    label,
+                    source,
+                    timestamp_ms,
+                    timestamp_ms + int(current_seconds * 1000),
+                )
             tail_start_seconds = max(0.0, context_seconds - current_seconds)
             turns = diarization_turns_for_window(
                 diarization,
@@ -982,7 +1059,13 @@ class LocalSpeechEngine:
                 if stt_audio is None:
                     continue
 
-                speaker_id = self._speaker_id_for_label(diarization, label, source)
+                speaker_id = self._speaker_id_for_label(
+                    diarization,
+                    label,
+                    source,
+                    timestamp_ms + int(relative_start * 1000),
+                    timestamp_ms + int(relative_end * 1000),
+                )
                 emit({
                     "type": "speaker_segment",
                     "speakerId": speaker_id,
@@ -1430,7 +1513,12 @@ class LocalSpeechEngine:
                 end_ms = int(event.get("endMs", start_ms + 1))
             except (TypeError, ValueError):
                 continue
-            speaker_id = self._cached_diarization_speaker_for(source, start_ms, end_ms, allow_fallback=True)
+            speaker_id = self._cached_diarization_speaker_for(source, start_ms, end_ms, allow_fallback=False)
+            if not speaker_id and self._uses_whisperlivekit_sortformer():
+                external_label = str(event.get("externalSpeakerId") or event.get("speakerId") or "")
+                speaker_id = self._speaker_id_for_external_label(source, external_label, start_ms, end_ms)
+            if not speaker_id:
+                speaker_id = self._cached_diarization_speaker_for(source, start_ms, end_ms, allow_fallback=True)
             if speaker_id:
                 event["speakerId"] = speaker_id
 
@@ -1492,12 +1580,13 @@ class LocalSpeechEngine:
                     current_seconds=len(pcm) / BYTES_PER_SECOND,
                 )
                 if label:
-                    speaker_key = self._stable_speaker_key(diarization, label)
-                    if speaker_key not in self.speaker_ids:
-                        if len(self.speaker_ids) >= max(1, self.config.max_speakers):
-                            return self._fallback_speaker_id(source)
-                        self.speaker_ids[speaker_key] = f"speaker_{len(self.speaker_ids) + 1}"
-                    return self.speaker_ids[speaker_key]
+                    return self._speaker_id_for_label(
+                        diarization,
+                        label,
+                        source,
+                        0,
+                        int(context_seconds * 1000),
+                    )
             except Exception as exc:
                 emit({"type": "error", "code": "diarization_failed", "message": str(exc), "recoverable": True})
 
@@ -1718,11 +1807,17 @@ class LocalSpeechEngine:
                 return
 
             label = turns[-1][0]
-            selected_speaker_id = self._speaker_id_for_label(diarization, label, source)
+            selected_speaker_id = self._speaker_id_for_label(
+                diarization,
+                label,
+                source,
+                timestamp_ms,
+                timestamp_ms + int(current_seconds * 1000),
+            )
             for turn_label, start_seconds, end_seconds in turns:
-                speaker_id = self._speaker_id_for_label(diarization, turn_label, source)
                 start_ms = base_timestamp_ms + int(start_seconds * 1000)
                 end_ms = base_timestamp_ms + int(end_seconds * 1000)
+                speaker_id = self._speaker_id_for_label(diarization, turn_label, source, start_ms, end_ms)
                 emit({
                     "type": "speaker_segment",
                     "speakerId": speaker_id,
@@ -1732,16 +1827,27 @@ class LocalSpeechEngine:
                 })
                 with self.streaming_diarization_lock:
                     if generation == self.streaming_diarization_generation:
-                        segments = self.streaming_diarization_segments.setdefault(source, [])
-                        segments.append((start_ms, end_ms, speaker_id))
-                        if len(segments) > 400:
-                            del segments[:-400]
+                        self.append_streaming_segment(source, start_ms, end_ms, speaker_id)
 
             with self.streaming_diarization_lock:
                 if generation == self.streaming_diarization_generation:
                     self.last_diarization_speakers[source] = selected_speaker_id
         except Exception as exc:
             emit({"type": "error", "code": "diarization_failed", "message": str(exc), "recoverable": True})
+
+    def append_streaming_segment(self, source: str, start_ms: int, end_ms: int, speaker_id: str) -> None:
+        segments = self.streaming_diarization_segments.setdefault(source, [])
+        if segments and segments[-1][2] == speaker_id and start_ms - segments[-1][1] <= 250:
+            previous_start, previous_end, previous_speaker = segments[-1]
+            segments[-1] = (previous_start, max(end_ms, previous_end), previous_speaker)
+        else:
+            segments.append((start_ms, end_ms, speaker_id))
+
+        cutoff_ms = end_ms - 10 * 60 * 1000
+        while segments and segments[0][1] < cutoff_ms:
+            del segments[0]
+        if len(segments) > 400:
+            del segments[:-400]
 
     def _streaming_diarization_base_timestamp_ms(self, source: str, timestamp_ms: int) -> int:
         if self._streaming_diarization_uses_absolute_time():
@@ -1755,8 +1861,70 @@ class LocalSpeechEngine:
                 return bool(absolute)
         return True
 
-    def _speaker_id_for_label(self, diarization: Any, label: str, source: str) -> str:
+    def _speaker_id_for_embedding(
+        self,
+        source: str,
+        label: str,
+        embedding: Any | None,
+        start_ms: int,
+        end_ms: int,
+        confidence: float = 1.0,
+    ) -> str:
+        if source == "mic":
+            return "mic"
+        vector = embedding_vector_or_none(embedding)
+        assignment = self.speaker_registry.assign(SpeakerObservation(
+            label=label,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            embedding=vector,
+            confidence=confidence,
+            source_model=self.config.diarization_model,
+        ))
+        return assignment.speaker_id
+
+    def _speaker_id_for_external_label(self, source: str, label: str, start_ms: int, end_ms: int) -> str:
+        if source == "mic":
+            return "mic"
+        assignment = self.speaker_registry.assign(SpeakerObservation(
+            label=label,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            embedding=None,
+            confidence=0.75,
+            source_model=self.config.diarization_model,
+        ))
+        if assignment.speaker_id == UNKNOWN_SPEAKER_ID and label:
+            return self.last_diarization_speakers.get(source, UNKNOWN_SPEAKER_ID)
+        return assignment.speaker_id
+
+    def _speaker_id_for_label(
+        self,
+        diarization: Any,
+        label: str,
+        source: str,
+        start_ms: int = 0,
+        end_ms: int | None = None,
+    ) -> str:
         with self.streaming_diarization_lock:
+            embedding = speaker_embedding_for_label(diarization, label)
+            if embedding is not None:
+                return self._speaker_id_for_embedding(
+                    source,
+                    label,
+                    embedding,
+                    start_ms,
+                    end_ms if end_ms is not None else start_ms + 1,
+                )
+
+            if self.config.diarization_model == "sortformer":
+                return self._speaker_id_for_external_label(
+                    source,
+                    label,
+                    start_ms,
+                    end_ms if end_ms is not None else start_ms + 1,
+                )
+
             speaker_key = self._stable_speaker_key(diarization, label)
             if speaker_key not in self.speaker_ids:
                 if len(self.speaker_ids) >= max(1, self.config.max_speakers):
@@ -1767,6 +1935,8 @@ class LocalSpeechEngine:
     def _diarization_speaker_kwargs(self, context_seconds: float) -> dict[str, int]:
         if self.config.exact_speakers:
             exact_speakers = max(1, self.config.exact_speakers)
+            if self.config.diarization_model == "pyannote_community":
+                return {"min_speakers": exact_speakers, "max_speakers": exact_speakers}
             return {"min_speakers": 1, "max_speakers": exact_speakers}
         return {"min_speakers": 1, "max_speakers": max(1, self.config.max_speakers)}
 
@@ -2895,9 +3065,11 @@ def worker_events_for_whisperlivekit_result(result: Any, base_start_ms: int, lat
             start_ms = base_start_ms + parse_time_ms(value_from_object(line, "start"), 0)
             end_ms = base_start_ms + parse_time_ms(value_from_object(line, "end"), start_ms - base_start_ms + 1)
             speaker = value_from_object(line, "speaker")
+            speaker_id = normalize_external_speaker_id(speaker)
             event = {
                 "type": "final_caption",
-                "speakerId": normalize_external_speaker_id(speaker),
+                "speakerId": speaker_id,
+                "externalSpeakerId": speaker_id,
                 "text": text,
                 "startMs": start_ms,
                 "endMs": max(start_ms + 1, end_ms),
@@ -3260,6 +3432,18 @@ def speaker_embedding_for_label(diarization: Any, label: str) -> Any | None:
         return None
 
 
+def embedding_vector_or_none(value: Any | None) -> list[float] | None:
+    if value is None:
+        return None
+
+    import numpy as np
+
+    vector = np.asarray(value, dtype="float32")
+    if vector.size == 0 or not np.all(np.isfinite(vector)):
+        return None
+    return [float(item) for item in vector.tolist()]
+
+
 def transcribe_chunk_seconds_for_quality(quality_preset: int) -> int:
     quality = clamp_quality_preset(quality_preset)
     if quality >= 75:
@@ -3287,7 +3471,12 @@ def diart_latency_seconds_for_quality(quality_preset: int) -> float:
     return 0.5
 
 
-def diart_duration_seconds_for_quality(_quality_preset: int) -> float:
+def diart_duration_seconds_for_quality(quality_preset: int) -> float:
+    quality = clamp_quality_preset(quality_preset)
+    if quality >= 75:
+        return 8.0
+    if quality >= 35:
+        return 6.0
     return 5.0
 
 

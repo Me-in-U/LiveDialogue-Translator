@@ -16,7 +16,7 @@
     <PackageReference Include="WPF-UI" Version="4.0.1" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\..\worker\speaker_worker.py;..\..\worker\requirements*.txt">
+    <Content Include="..\..\worker\speaker_worker.py;..\..\worker\diarization_state.py;..\..\worker\requirements*.txt">
       <Link>worker\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

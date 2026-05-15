@@ -55,7 +55,10 @@ public sealed class SettingsStore
 
     public WorkerConfiguration ToWorkerConfiguration(AppSettings settings)
     {
-        var maxSpeakers = settings.ExactSpeakers is > 0 ? settings.ExactSpeakers.Value : settings.MaxSpeakers;
+        var exactSpeakers = settings.SpeakerCountMode == SpeakerCountMode.Exact
+            ? Math.Max(1, settings.ExactSpeakers ?? settings.MaxSpeakers)
+            : (int?)null;
+        var maxSpeakers = exactSpeakers ?? settings.MaxSpeakers;
         return new WorkerConfiguration(
             settings.InputMode,
             settings.SttModel,
@@ -65,7 +68,7 @@ public sealed class SettingsStore
             settings.DiarizationEnabled,
             settings.DiarizationModel,
             maxSpeakers,
-            null,
+            exactSpeakers,
             settings.ShowLatency,
             new Dictionary<string, string>(),
             settings.DiartManualSettings,
@@ -75,17 +78,30 @@ public sealed class SettingsStore
             settings.DiartTauActive,
             settings.DiartRhoUpdate,
             settings.DiartDeltaNew,
-            settings.DiarizationQualityPreset,
-            settings.AsrEngine);
+            DiarizationQualityPreset: settings.DiarizationQualityPreset,
+            AsrEngine: settings.AsrEngine,
+            SpeakerCountMode: settings.SpeakerCountMode);
     }
 
     private static void NormalizeSettings(AppSettings settings)
     {
         settings.SttQualityPreset = settings.SttQualityPreset >= 75 ? 100 : settings.SttQualityPreset >= 35 ? 50 : 0;
         settings.DiarizationQualityPreset = settings.DiarizationQualityPreset >= 75 ? 100 : settings.DiarizationQualityPreset >= 35 ? 50 : 0;
+        if (!Enum.IsDefined(settings.SpeakerCountMode))
+        {
+            settings.SpeakerCountMode = SpeakerCountMode.ActiveMax;
+        }
         if (settings.ExactSpeakers is > 0)
         {
             settings.MaxSpeakers = settings.ExactSpeakers.Value;
+            settings.SpeakerCountMode = SpeakerCountMode.Exact;
+        }
+        if (settings.SpeakerCountMode == SpeakerCountMode.Exact)
+        {
+            settings.ExactSpeakers = settings.ExactSpeakers is > 0 ? settings.ExactSpeakers.Value : settings.MaxSpeakers;
+        }
+        else
+        {
             settings.ExactSpeakers = null;
         }
         settings.DisplayLines = NormalizeLineCount(settings.DisplayLines);

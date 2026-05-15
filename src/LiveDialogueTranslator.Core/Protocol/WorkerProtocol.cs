@@ -24,6 +24,13 @@ public enum DiarizationModel
     Sortformer
 }
 
+public enum SpeakerCountMode
+{
+    ActiveMax,
+    Exact,
+    SessionMax
+}
+
 public enum AsrEngine
 {
     None,
@@ -52,7 +59,8 @@ public sealed record WorkerConfiguration(
     double? DiartRhoUpdate = null,
     double? DiartDeltaNew = null,
     int DiarizationQualityPreset = 100,
-    AsrEngine AsrEngine = AsrEngine.None);
+    AsrEngine AsrEngine = AsrEngine.None,
+    SpeakerCountMode SpeakerCountMode = SpeakerCountMode.ActiveMax);
 
 public sealed record WorkerCommand(string Type, IReadOnlyDictionary<string, object?> Payload);
 
@@ -134,6 +142,7 @@ public static class WorkerProtocol
             ["diarizationEnabled"] = configuration.DiarizationEnabled,
             ["diarizationModel"] = FormatDiarizationModel(configuration.DiarizationModel),
             ["maxSpeakers"] = configuration.MaxSpeakers,
+            ["speakerCountMode"] = FormatSpeakerCountMode(configuration.SpeakerCountMode),
             ["showLatency"] = configuration.ShowLatency,
             ["speakerNames"] = configuration.SpeakerNames,
             ["asrEngine"] = FormatAsrEngine(configuration.AsrEngine),
@@ -270,6 +279,17 @@ public static class WorkerProtocol
             AsrEngine.WhisperLiveKitSortformer => "whisperlivekit_sortformer",
             AsrEngine.WhisperX => "whisperx",
             _ => throw new ArgumentOutOfRangeException(nameof(engine), engine, null)
+        };
+    }
+
+    public static string FormatSpeakerCountMode(SpeakerCountMode mode)
+    {
+        return mode switch
+        {
+            SpeakerCountMode.Exact => "exact",
+            SpeakerCountMode.SessionMax => "session_max",
+            SpeakerCountMode.ActiveMax => "active_max",
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
     }
 

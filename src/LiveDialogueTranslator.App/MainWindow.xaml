@@ -580,6 +580,19 @@
                                 <RadioButton x:Name="MaxSpeakers7Radio" Content="7" GroupName="SpeakerCount" Tag="auto:7" Height="23" Checked="RestartSetting_CheckedChanged" />
                                 <RadioButton x:Name="MaxSpeakers8Radio" Content="8" GroupName="SpeakerCount" Tag="auto:8" Height="23" Checked="RestartSetting_CheckedChanged" />
                             </UniformGrid>
+                            <TextBlock x:Name="SpeakerModeLabel" Margin="2,6,0,2" Text="Speaker Mode" />
+                            <UniformGrid x:Name="SpeakerCountModePanel" Columns="2" Margin="0,1,0,0">
+                                <RadioButton x:Name="SpeakerModeActiveMaxRadio"
+                                             Content="Max active"
+                                             GroupName="SpeakerCountMode"
+                                             Height="23"
+                                             Checked="RestartSetting_CheckedChanged" />
+                                <RadioButton x:Name="SpeakerModeExactRadio"
+                                             Content="Exact"
+                                             GroupName="SpeakerCountMode"
+                                             Height="23"
+                                             Checked="RestartSetting_CheckedChanged" />
+                            </UniformGrid>
                         </StackPanel>
                     </Border>
 
