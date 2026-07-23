@@ -31,6 +31,14 @@ and diarization backends, license, runtime path, and local data directory.
 The console screen shows Python worker logs separately from captions, with quick
 controls for clearing logs and keeping the view pinned to the latest output.
 
+## Installed Size Example
+
+![LiveDialogue Translator installed size](assets/screenshots/installed-size.png)
+
+One fully provisioned local setup used approximately 23 GB: about 14.6 GB for
+downloaded models and 8.4 GB for runtime files. Actual disk use varies with the
+selected ASR and diarization engines and models.
+
 ## Overlay
 
 > Overlay screenshot placeholder. Add the final overlay capture to

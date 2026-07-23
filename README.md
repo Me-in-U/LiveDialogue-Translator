@@ -86,6 +86,13 @@ app downloads the official Python 3.11.9 x64 embeddable runtime from python.org,
 extracts it under `%LOCALAPPDATA%\LiveDialogue Translator\runtime\python-3.11.9`,
 bootstraps pip, and installs the worker dependencies there.
 
+> [!WARNING]
+> Local runtime and model downloads can use substantial disk space. One fully
+> provisioned setup occupied approximately **23 GB** under
+> `%LOCALAPPDATA%\LiveDialogue Translator` (about 14.6 GB of models and 8.4 GB
+> of runtime files). The actual size varies with the ASR/diarization engines and
+> models you install; keep the free-space guidance below in mind before setup.
+
 ## Model Combination Hardware Guide
 
 The numbers below are conservative minimums for the current selectable model
