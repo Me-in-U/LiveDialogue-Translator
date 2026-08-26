@@ -17,6 +17,7 @@ import time
 import unicodedata
 import warnings
 import wave
+import importlib
 import importlib.util
 from array import array
 from dataclasses import dataclass, field
@@ -4651,12 +4652,13 @@ def check_environment(models_dir: Path) -> int:
     diarization_model = normalize_diarization_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_MODEL"))
     speech_separation_model = normalize_speech_separation_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL"))
     materialize_model_cache_links(models_dir, stt_model)
+    qwen_runtime_error = qwen_asr_runtime_error() if asr_engine == "qwen3_asr_diarization" else None
     packages = {
         "faster_whisper": has_module("faster_whisper"),
         "pyannote_audio": has_module("pyannote.audio"),
         "diart": has_module("diart"),
         "torch": has_module("torch"),
-        "qwen_asr": has_module("qwen_asr"),
+        "qwen_asr": has_module("qwen_asr") and qwen_runtime_error is None,
         "whisperlivekit": has_module("whisperlivekit"),
         "whisperx": has_module("whisperx"),
         "clearvoice": has_module("clearvoice"),
@@ -4670,7 +4672,7 @@ def check_environment(models_dir: Path) -> int:
     else:
         model_prepared = any(whisper_root.rglob("*")) if whisper_root.exists() else False
     stt_model_loadable = False
-    stt_model_error = None
+    stt_model_error = qwen_runtime_error
     if asr_engine == "qwen3_asr_diarization":
         stt_model_loadable = packages["qwen_asr"]
     elif asr_engine == "whisperlivekit_sortformer":
@@ -4707,6 +4709,17 @@ def check_environment(models_dir: Path) -> int:
         "sttModel": stt_model,
     }, ensure_ascii=False), flush=True)
     return 0
+
+
+def qwen_asr_runtime_error() -> str | None:
+    if not has_module("qwen_asr"):
+        return "qwen-asr package is not installed."
+
+    try:
+        importlib.import_module("transformers")
+    except Exception as exc:
+        return str(exc)
+    return None
 
 
 def is_speech_separation_package_available(model: str, packages: dict[str, bool]) -> bool:

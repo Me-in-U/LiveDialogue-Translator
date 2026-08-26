@@ -794,7 +794,7 @@ static void WorkerRequirementsPinPyannoteBeforeTorchcodecDependencyLine()
     Assert.Contains("torch==2.11.0", requirements);
     Assert.Contains("torchaudio==2.11.0", requirements);
     Assert.Contains("torchcodec==0.11.1", requirements);
-    Assert.Contains("huggingface-hub==1.14.0", requirements);
+    Assert.Contains("huggingface-hub==0.36.2", requirements);
     Assert.True(!requirements.Contains("pyannote.audio>=", StringComparison.Ordinal), "pyannote.audio must stay aligned with the Community-1 model API.");
     Assert.True(!requirements.Contains("torch>=", StringComparison.Ordinal), "torch must stay aligned with torchaudio and torchcodec.");
     Assert.True(!requirements.Contains("torchaudio>=", StringComparison.Ordinal), "torchaudio must stay aligned with torch.");
@@ -803,6 +803,8 @@ static void WorkerRequirementsPinPyannoteBeforeTorchcodecDependencyLine()
     var qwenEnv = File.ReadAllText(Path.Combine("worker", "env", "qwen3-asr.env"));
     var wlkRequirements = File.ReadAllText(Path.Combine("worker", "requirements-whisperlivekit-sortformer.txt"));
     Assert.Contains("qwen-asr==0.0.6", qwenRequirements);
+    Assert.Contains("transformers==4.57.6", qwenRequirements);
+    Assert.Contains("huggingface-hub==0.36.2", qwenRequirements);
     Assert.Contains("Qwen/Qwen3-ASR-1.7B", qwenEnv);
     Assert.Contains("Qwen/Qwen3-ASR-0.6B", qwenEnv);
     Assert.Contains("Qwen/Qwen3-ForcedAligner-0.6B", qwenEnv);
@@ -2415,8 +2417,11 @@ static void SpeechSeparationRequirementsOnlyExposeIntegratedModels()
 
     Assert.Contains("clearvoice==0.1.2", moss);
     Assert.Contains("speechbrain==1.0.3", sep);
+    Assert.Contains("huggingface-hub==0.36.2", moss);
+    Assert.Contains("huggingface-hub==0.36.2", sep);
     Assert.Contains("requirements-speech-separation-mossformer2.txt", environment);
     Assert.Contains("requirements-speech-separation-sepformer.txt", environment);
+    Assert.Contains("string.Join(Path.PathSeparator, existing, separationSite)", environment);
     Assert.True(!environment.Contains("RE-SepFormer", StringComparison.OrdinalIgnoreCase), "Unintegrated research models must not appear as selectable runtimes.");
     Assert.True(!environment.Contains("TF-GridNet", StringComparison.OrdinalIgnoreCase), "Unintegrated research models must not appear as selectable runtimes.");
 }

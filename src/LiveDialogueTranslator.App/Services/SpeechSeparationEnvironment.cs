@@ -24,7 +24,7 @@ public static class SpeechSeparationEnvironment
             : null;
         environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE_SITE"] = string.IsNullOrWhiteSpace(existing)
             ? separationSite
-            : string.Join(Path.PathSeparator, separationSite, existing);
+            : string.Join(Path.PathSeparator, existing, separationSite);
     }
 
     public static string RequirementsPath(SpeechSeparationModel model)

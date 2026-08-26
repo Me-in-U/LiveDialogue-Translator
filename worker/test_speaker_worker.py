@@ -787,12 +787,14 @@ print("ok")
 
     def test_check_environment_does_not_validate_qwen_as_faster_whisper_model(self) -> None:
         original_has_module = speaker_worker.has_module
+        original_qwen_runtime_error = speaker_worker.qwen_asr_runtime_error
         original_materialize = speaker_worker.materialize_model_cache_links
         original_env = {
             "LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"),
             "LIVE_DIALOGUE_TRANSLATOR_STT_MODEL": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_STT_MODEL"),
         }
         speaker_worker.has_module = lambda name: name in {"faster_whisper", "qwen_asr", "torch"}
+        speaker_worker.qwen_asr_runtime_error = lambda: None
         speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
         os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "qwen3_asr_diarization"
         os.environ["LIVE_DIALOGUE_TRANSLATOR_STT_MODEL"] = "qwen3-asr-1.7b"
@@ -802,6 +804,7 @@ print("ok")
                 exit_code = speaker_worker.check_environment(Path("models"))
         finally:
             speaker_worker.has_module = original_has_module
+            speaker_worker.qwen_asr_runtime_error = original_qwen_runtime_error
             speaker_worker.materialize_model_cache_links = original_materialize
             for key, value in original_env.items():
                 if value is None:
@@ -814,6 +817,35 @@ print("ok")
         self.assertTrue(payload["sttModelPrepared"])
         self.assertTrue(payload["sttModelLoadable"])
         self.assertIsNone(payload["sttModelError"])
+
+    def test_check_environment_rejects_incompatible_qwen_runtime(self) -> None:
+        original_has_module = speaker_worker.has_module
+        original_qwen_runtime_error = speaker_worker.qwen_asr_runtime_error
+        original_materialize = speaker_worker.materialize_model_cache_links
+        original_engine = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE")
+        speaker_worker.has_module = lambda name: name in {"faster_whisper", "qwen_asr", "torch"}
+        speaker_worker.qwen_asr_runtime_error = lambda: "huggingface-hub must be below 1.0"
+        speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
+        os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "qwen3_asr_diarization"
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exit_code = speaker_worker.check_environment(Path("models"))
+        finally:
+            speaker_worker.has_module = original_has_module
+            speaker_worker.qwen_asr_runtime_error = original_qwen_runtime_error
+            speaker_worker.materialize_model_cache_links = original_materialize
+            if original_engine is None:
+                os.environ.pop("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE", None)
+            else:
+                os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = original_engine
+
+        self.assertEqual(0, exit_code)
+        payload = json.loads(stdout.getvalue())
+        self.assertFalse(payload["qwenAsrAvailable"])
+        self.assertFalse(payload["sttModelPrepared"])
+        self.assertFalse(payload["sttModelLoadable"])
+        self.assertEqual("huggingface-hub must be below 1.0", payload["sttModelError"])
 
     def test_check_environment_accepts_whisperlivekit_default_model(self) -> None:
         original_has_module = speaker_worker.has_module
