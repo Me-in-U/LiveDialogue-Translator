@@ -99,6 +99,10 @@ public sealed class SettingsStore
         {
             settings.SpeechSeparationModel = SpeechSeparationModel.Auto;
         }
+        if (settings.TranslateProvider != TranslateProvider.Google)
+        {
+            settings.TranslateProvider = TranslateProvider.Google;
+        }
         if (settings.ExactSpeakers is > 0)
         {
             settings.MaxSpeakers = settings.ExactSpeakers.Value;

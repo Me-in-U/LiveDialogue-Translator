@@ -84,6 +84,13 @@ same capture. This avoids duplicate speaker decisions and prevents optional
 runtime dependency conflicts. When separation is Off, the existing Community-1,
 Diart, or Sortformer diarization path is unchanged.
 
+The Settings page groups both choices under Speaker Processing. It calls
+MossFormer2 and SepFormer overlapping voice separation, and calls Community-1,
+Diart, and Sortformer general speaker identification. Enabling an overlapping
+voice separator pauses and disables the general identification controls while
+preserving their saved values for later use. A live summary states which path
+will actually run before capture starts.
+
 ## Multilingual behavior
 
 The separator operates on waveforms and has no language selection. Each stem

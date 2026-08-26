@@ -130,6 +130,7 @@ var tests = new (string Name, Action Body)[]
     ("speech separation advisor rejects unsupported runtime paths", SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths),
     ("startup planner installs and prepares selected separation model", StartupPlannerInstallsAndPreparesSpeechSeparation),
     ("main window exposes automatic hardware based separation selection", MainWindowExposesAutomaticHardwareBasedSpeechSeparation),
+    ("settings page separates recognition from speaker processing", SettingsPageSeparatesRecognitionFromSpeakerProcessing),
     ("speech separation requirements only expose integrated models", SpeechSeparationRequirementsOnlyExposeIntegratedModels),
 };
 
@@ -1155,9 +1156,13 @@ static void MainWindowExposesTranslationProviderAndDisplayModes()
     var xaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml"));
     var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
     var settings = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Models", "AppSettings.cs"));
+    var settingsStore = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "SettingsStore.cs"));
     var localizerSource = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
 
     Assert.Contains("x:Name=\"TranslateProviderBox\"", xaml);
+    Assert.Contains("x:Name=\"TranslationProviderAvailabilityText\"", xaml);
+    Assert.Contains("x:Name=\"TranslateProviderOpenAIItem\" Content=\"OpenAI\" Tag=\"OpenAI\" IsEnabled=\"False\"", xaml);
+    Assert.Contains("ToolTipService.ShowOnDisabled=\"True\"", xaml);
     Assert.Contains("x:Name=\"TranslateApiSettingsButton\"", xaml);
     Assert.Contains("x:Name=\"TargetLanguageBox\"", xaml);
     Assert.Contains("x:Name=\"DisplayOriginalRadio\"", xaml);
@@ -1168,6 +1173,7 @@ static void MainWindowExposesTranslationProviderAndDisplayModes()
     Assert.Contains("settings.CaptionDisplayMode = SelectedCaptionDisplayMode();", source);
     Assert.Contains("public TranslateProvider TranslateProvider", settings);
     Assert.Contains("public CaptionDisplayMode CaptionDisplayMode", settings);
+    Assert.Contains("settings.TranslateProvider != TranslateProvider.Google", settingsStore);
     Assert.Contains("TranslateApi", localizerSource);
     Assert.Contains("TargetLanguage", localizerSource);
     Assert.Contains("DisplayBoth", localizerSource);
@@ -1562,22 +1568,29 @@ static void MainWindowFitsSettingsPageHeightToContent()
     var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
     var localizerSource = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
 
-    Assert.Contains("x:Name=\"SettingsPanel\" Margin=\"10,8,10,6\" VerticalAlignment=\"Top\"", xaml);
-    Assert.Contains("<Grid x:Name=\"SettingsPanel\"", xaml);
+    Assert.Contains("<ScrollViewer x:Name=\"SettingsPanel\"", xaml);
+    Assert.Contains("VerticalAlignment=\"Stretch\"", xaml);
+    Assert.Contains("VerticalScrollBarVisibility=\"Auto\"", xaml);
+    Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", xaml);
+    Assert.Contains("<Grid x:Name=\"SettingsLayoutGrid\">", xaml);
     Assert.True(!xaml.Contains("<Setter Property=\"Width\" Value=\"258\" />", StringComparison.Ordinal), "Settings groups should not use the old wide fixed card width.");
     Assert.Contains("<ColumnDefinition Width=\"1*\" />", xaml);
     Assert.Contains("SettingsGroupBorderStyle", xaml);
     Assert.Contains("<Style x:Key=\"SettingsGroupTitleStyle\"", xaml);
-    Assert.Contains("<Setter Property=\"Foreground\" Value=\"{StaticResource MutedBrush}\" />", xaml);
+    Assert.Contains("<Style x:Key=\"SettingsHintStyle\"", xaml);
+    Assert.Contains("<Style x:Key=\"SettingsStateBorderStyle\"", xaml);
     Assert.Contains("SettingsAudioGroupTitle", xaml);
-    Assert.Contains("SettingsModelGroupTitle", xaml);
-    Assert.Contains("SettingsDiarizationGroupTitle", xaml);
+    Assert.Contains("x:Name=\"AudioInputSummaryText\"", xaml);
+    Assert.True(!xaml.Contains("MicMonitorSlider", StringComparison.Ordinal), "The unused microphone monitor slider should not remain in Settings.");
+    Assert.Contains("SettingsAsrGroupTitle", xaml);
+    Assert.Contains("SettingsSpeakerProcessingGroupTitle", xaml);
     Assert.Contains("SettingsTranslationGroupTitle", xaml);
-    Assert.Contains("SettingsOverlayGroupTitle", xaml);
+    Assert.Contains("SettingsOutputGroupTitle", xaml);
     Assert.Contains("SettingsToolsGroupTitle", xaml);
     Assert.Contains("SettingsAudioGroupTitle.Text = L(\"SettingsAudioGroup\")", source);
     Assert.Contains("[\"SettingsAudioGroup\"]", localizerSource);
-    Assert.Contains("[\"SettingsModelGroup\"]", localizerSource);
+    Assert.Contains("[\"SettingsAsrGroup\"]", localizerSource);
+    Assert.Contains("[\"SettingsSpeakerProcessingGroup\"]", localizerSource);
     Assert.Contains("[\"SettingsTranslationGroup\"]", localizerSource);
     Assert.Contains("[\"SettingsOverlayGroup\"]", localizerSource);
     Assert.Contains("AdjustWindowHeightToSettingsContent();", source);
@@ -1591,13 +1604,19 @@ static void MainWindowPutsDisplayLinesInOverlaySettings()
 {
     var xaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml"));
 
-    var diarizationGroup = xaml.IndexOf("x:Name=\"SettingsDiarizationGroupTitle\"", StringComparison.Ordinal);
-    var translationGroup = xaml.IndexOf("x:Name=\"SettingsTranslationGroupTitle\"", StringComparison.Ordinal);
-    var overlayGroup = xaml.IndexOf("x:Name=\"SettingsOverlayGroupTitle\"", StringComparison.Ordinal);
+    var overlayGroup = xaml.IndexOf("x:Name=\"SettingsOutputGroupTitle\"", StringComparison.Ordinal);
+    var captionDisplayMode = xaml.IndexOf("x:Name=\"CaptionDisplayModeLabel\"", StringComparison.Ordinal);
+    var captionDisplayLines = xaml.IndexOf("x:Name=\"CaptionDisplayLinesLabel\"", StringComparison.Ordinal);
     var displayLines = xaml.IndexOf("x:Name=\"OverlayDisplayLinesLabel\"", StringComparison.Ordinal);
+    var speakerGroup = xaml.IndexOf("x:Name=\"SettingsSpeakerProcessingGroupTitle\"", StringComparison.Ordinal);
 
-    Assert.True(diarizationGroup >= 0 && translationGroup > diarizationGroup && overlayGroup > translationGroup && displayLines > overlayGroup,
-        "Lines per speaker should live in the Overlay category, not the diarization category.");
+    Assert.True(
+        overlayGroup >= 0 &&
+        captionDisplayMode > overlayGroup &&
+        captionDisplayLines > overlayGroup &&
+        displayLines > overlayGroup &&
+        speakerGroup > displayLines,
+        "Caption and overlay display controls should remain grouped in the output card, outside speaker processing.");
     Assert.Contains("x:Name=\"OverlayDisplayLinesBox\"", xaml);
 }
 
@@ -2360,6 +2379,32 @@ static void MainWindowExposesAutomaticHardwareBasedSpeechSeparation()
     Assert.Contains("sender == SttModelBox", source);
     Assert.Contains("nvidia-smi", detector);
     Assert.Contains("GlobalMemoryStatusEx", detector);
+}
+
+static void SettingsPageSeparatesRecognitionFromSpeakerProcessing()
+{
+    var xaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml"));
+    var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
+    var localizer = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
+
+    var asrGroup = xaml.IndexOf("x:Name=\"SettingsAsrGroupTitle\"", StringComparison.Ordinal);
+    var separationModel = xaml.IndexOf("x:Name=\"SpeechSeparationModelBox\"", StringComparison.Ordinal);
+    var speakerGroup = xaml.IndexOf("x:Name=\"SettingsSpeakerProcessingGroupTitle\"", StringComparison.Ordinal);
+    Assert.True(asrGroup >= 0 && speakerGroup > asrGroup && separationModel > speakerGroup,
+        "Overlapping voice separation must live in Speaker Processing rather than Speech Recognition.");
+    Assert.Contains("x:Name=\"SpeakerProcessingStatusText\"", xaml);
+    Assert.Contains("x:Name=\"DiarizationSettingsPanel\"", xaml);
+    Assert.Contains("x:Name=\"DiarizationConfigurationPanel\"", xaml);
+    Assert.Contains("x:Name=\"DiarizationInactiveNoticeText\"", xaml);
+    Assert.Contains("DiarizationSettingsPanel.IsEnabled = !separationActive;", source);
+    Assert.Contains("DiarizationConfigurationPanel.IsEnabled = !separationActive && identificationEnabled;", source);
+    Assert.Contains("SpeakerProcessingStatusSeparation", source);
+    Assert.Contains("SpeakerProcessingStatusIdentification", source);
+    Assert.Contains("SelectedEffectiveSpeechSeparationModel()", source);
+    Assert.Contains("[\"SettingsSpeakerProcessingGroup\"]", localizer);
+    Assert.Contains("[\"SpeakerIdentificationDescription\"]", localizer);
+    Assert.Contains("[\"SpeechSeparationDescription\"]", localizer);
+    Assert.Contains("[\"DiarizationModel\"] = (\"Identification Model\", \"화자 식별 모델\")", localizer);
 }
 
 static void SpeechSeparationRequirementsOnlyExposeIntegratedModels()

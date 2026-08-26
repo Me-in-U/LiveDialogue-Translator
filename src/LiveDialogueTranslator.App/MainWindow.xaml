@@ -42,7 +42,7 @@
         </Style>
         <Style x:Key="SettingsGroupBorderStyle" TargetType="Border">
             <Setter Property="Margin" Value="0" />
-            <Setter Property="Padding" Value="8,7,8,8" />
+            <Setter Property="Padding" Value="11,9,11,10" />
             <Setter Property="Background" Value="{StaticResource PanelBrush}" />
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -50,9 +50,29 @@
         </Style>
         <Style x:Key="SettingsGroupTitleStyle" TargetType="TextBlock">
             <Setter Property="Margin" Value="0,0,0,8" />
-            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="SettingsSectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="2,8,0,4" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="SettingsHintStyle" TargetType="TextBlock">
+            <Setter Property="Margin" Value="2,0,0,5" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style x:Key="SettingsStateBorderStyle" TargetType="Border">
+            <Setter Property="Margin" Value="0,0,0,7" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Background" Value="#202F39" />
+            <Setter Property="BorderBrush" Value="#31566D" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
         </Style>
         <Style x:Key="ConsoleKeepBottomButtonStyle" TargetType="{x:Type ToggleButton}">
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
@@ -394,312 +414,266 @@
                     </Border>
                 </Grid>
 
-                <Grid x:Name="SettingsPanel" Margin="10,8,10,6" VerticalAlignment="Top" Visibility="Collapsed">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="1*" />
-                        <ColumnDefinition Width="1*" />
-                        <ColumnDefinition Width="1*" />
-                        <ColumnDefinition Width="1*" />
-                        <ColumnDefinition Width="1*" />
-                    </Grid.ColumnDefinitions>
+                <ScrollViewer x:Name="SettingsPanel"
+                              Margin="10,8,10,6"
+                              VerticalAlignment="Stretch"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Visibility="Collapsed">
+                    <Grid x:Name="SettingsLayoutGrid">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1*" />
+                            <ColumnDefinition Width="1*" />
+                            <ColumnDefinition Width="1*" />
+                        </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" Margin="0,0,7,0">
-                        <Border Style="{StaticResource SettingsGroupBorderStyle}" Margin="0,0,0,7">
+                        <StackPanel Grid.Column="0" Margin="0,0,7,0">
+                            <Border Style="{StaticResource SettingsGroupBorderStyle}" Margin="0,0,0,7">
+                                <StackPanel>
+                                    <TextBlock x:Name="SettingsAudioGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Audio Input" />
+                                    <TextBlock x:Name="SettingsAudioDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="AudioSourcesLabel" Margin="2,0,0,4" Text="Audio Sources" />
+                                    <ComboBox x:Name="InputModeBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                        <ComboBoxItem x:Name="InputSystemMicItem" Content="System + Mic" Tag="SystemAndMic" />
+                                        <ComboBoxItem x:Name="InputSystemOnlyItem" Content="System Only" Tag="SystemAudioOnly" />
+                                        <ComboBoxItem x:Name="InputMixedDeviceItem" Content="Mixed Device" Tag="MixedDevice" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="AudioInputSummaryText" Margin="2,5,0,0" Style="{StaticResource SettingsHintStyle}" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsGroupBorderStyle}" Margin="0,0,0,7">
+                                <StackPanel>
+                                    <TextBlock x:Name="SettingsTranslationGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Translation" />
+                                    <TextBlock x:Name="SettingsTranslationDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="TranslateApiLabel" Margin="2,0,0,4" Text="Translate API" />
+                                    <ComboBox x:Name="TranslateProviderBox" Height="28" SelectionChanged="TranslationSetting_SelectionChanged">
+                                        <ComboBoxItem x:Name="TranslateProviderGoogleItem" Content="Google" Tag="Google" />
+                                        <ComboBoxItem x:Name="TranslateProviderGoogle2Item" Content="Google2" Tag="Google2" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderOllamaItem" Content="Ollama" Tag="Ollama" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderOpenAIItem" Content="OpenAI" Tag="OpenAI" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderOpenRouterItem" Content="OpenRouter" Tag="OpenRouter" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderDeepLItem" Content="DeepL" Tag="DeepL" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderYoudaoItem" Content="Youdao" Tag="Youdao" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderBaiduItem" Content="Baidu" Tag="Baidu" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderMTranServerItem" Content="MTranServer" Tag="MTranServer" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        <ComboBoxItem x:Name="TranslateProviderLibreTranslateItem" Content="LibreTranslate" Tag="LibreTranslate" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="TranslationProviderAvailabilityText" Margin="2,5,0,0" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="TargetLanguageLabel" Margin="2,7,0,3" Text="Target Language" />
+                                    <ComboBox x:Name="TargetLanguageBox" Height="28" MaxDropDownHeight="220" SelectionChanged="TranslationSetting_SelectionChanged">
+                                        <ComboBoxItem Content="ko-KR" Tag="ko" />
+                                        <ComboBoxItem Content="en-US" Tag="en" />
+                                        <ComboBoxItem Content="en-GB" Tag="en" />
+                                        <ComboBoxItem Content="ja-JP" Tag="ja" />
+                                        <ComboBoxItem Content="zh-CN" Tag="zh-CN" />
+                                        <ComboBoxItem Content="zh-TW" Tag="zh-TW" />
+                                        <ComboBoxItem Content="fr-FR" Tag="fr" />
+                                        <ComboBoxItem Content="de-DE" Tag="de" />
+                                        <ComboBoxItem Content="th-TH" Tag="th" />
+                                        <ComboBoxItem Content="ru-RU" Tag="ru" />
+                                        <ComboBoxItem Content="es-ES" Tag="es" />
+                                        <ComboBoxItem Content="pt-BR" Tag="pt" />
+                                        <ComboBoxItem Content="tr-TR" Tag="tr" />
+                                        <ComboBoxItem Content="ar-SA" Tag="ar" />
+                                    </ComboBox>
+                                    <Button x:Name="TranslateApiSettingsButton" Height="27" Margin="0,6,0,0" Click="TranslateApiSettingsButton_Click">Open</Button>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsGroupBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="SettingsToolsGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Tools" />
+                                    <TextBlock x:Name="SettingsToolsDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="ModelManagerLabel" Margin="2,0,0,4" Text="Model Manager" />
+                                    <Button x:Name="ModelManagerButton" Height="28" Click="ModelManagerButton_Click">Open</Button>
+                                    <TextBlock x:Name="DebugLabel" Margin="2,7,0,3" Text="Debug" />
+                                    <Button x:Name="DebugButton" Height="28" Click="DebugButton_Click">Console</Button>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Margin="0,0,7,0">
+                            <Border Style="{StaticResource SettingsGroupBorderStyle}" Margin="0,0,0,7">
+                                <StackPanel>
+                                    <TextBlock x:Name="SettingsAsrGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Speech Recognition" />
+                                    <TextBlock x:Name="SettingsAsrDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="AsrEngineLabel" Margin="2,0,0,4" Text="ASR Engine" />
+                                    <ComboBox x:Name="AsrEngineBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                        <ComboBoxItem x:Name="AsrEngineFasterWhisperItem" Content="Faster-Whisper" Tag="None" />
+                                        <ComboBoxItem x:Name="AsrEngineQwenItem" Content="Qwen3-ASR + diarization" Tag="Qwen3Asr" />
+                                        <ComboBoxItem x:Name="AsrEngineWhisperLiveKitItem" Content="WhisperLiveKit + Sortformer" Tag="WhisperLiveKitSortformer" />
+                                        <ComboBoxItem x:Name="AsrEngineWhisperXItem" Content="WhisperX" Tag="WhisperX" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="AsrEngineHintText" Margin="2,4,0,0" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="SttModelLabel" Margin="2,5,0,4" Text="STT Model" />
+                                    <ComboBox x:Name="SttModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                        <ComboBoxItem x:Name="SttDefaultItem" Content="Default" />
+                                        <ComboBoxItem x:Name="SttTinyItem" Content="tiny" />
+                                        <ComboBoxItem x:Name="SttBaseItem" Content="base" />
+                                        <ComboBoxItem x:Name="SttSmallItem" Content="small" />
+                                        <ComboBoxItem x:Name="SttMediumItem" Content="medium" />
+                                        <ComboBoxItem x:Name="SttLargeV3Item" Content="large-v3" />
+                                        <ComboBoxItem x:Name="SttLargeV3TurboItem" Content="large-v3-turbo" />
+                                        <ComboBoxItem x:Name="SttQwen06BItem" Content="qwen3-asr-0.6b" />
+                                        <ComboBoxItem x:Name="SttQwen17BItem" Content="qwen3-asr-1.7b" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="SttLanguagesLabel" Margin="2,7,0,3" Text="STT Languages" />
+                                    <Button x:Name="SttLanguagesButton" Height="28" Click="SttLanguagesButton_Click">Auto</Button>
+                                    <TextBlock x:Name="ComputeLabel" Margin="2,7,0,3" Text="Compute" />
+                                    <ComboBox x:Name="ComputeModeBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                        <ComboBoxItem x:Name="ComputeAutoItem" Content="Auto" Tag="Auto" />
+                                        <ComboBoxItem Content="CPU" Tag="Cpu" />
+                                        <ComboBoxItem Content="CUDA" Tag="Cuda" />
+                                    </ComboBox>
+                                    <TextBlock x:Name="SttPresetLabel" Margin="2,7,0,3" Text="Preset" />
+                                    <UniformGrid Columns="3" Margin="0,1,0,0">
+                                        <RadioButton x:Name="SttPresetSpeedRadio" GroupName="SttPreset" Height="26" Content="Sensitive" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="SttPresetDebateRadio" GroupName="SttPreset" Height="26" Content="Balanced" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="SttPresetTalkShowRadio" GroupName="SttPreset" Height="26" Content="Stable" Checked="RestartSetting_CheckedChanged" />
+                                    </UniformGrid>
+                                    <TextBlock x:Name="SttPresetSummaryText" MinHeight="16" Margin="2,3,0,0" Style="{StaticResource SettingsHintStyle}" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsGroupBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock x:Name="SettingsOutputGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Captions and Overlay" />
+                                    <TextBlock x:Name="SettingsOutputDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                    <TextBlock x:Name="CaptionDisplayModeLabel" Margin="2,0,0,3" Text="Display" />
+                                    <UniformGrid Columns="3" Margin="0,1,0,0">
+                                        <RadioButton x:Name="DisplayOriginalRadio" Height="22" Content="Original" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
+                                        <RadioButton x:Name="DisplayTranslatedRadio" Height="22" Content="Translated" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
+                                        <RadioButton x:Name="DisplayBothRadio" Height="22" Content="Both" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
+                                    </UniformGrid>
+                                    <Grid Margin="0,5,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock x:Name="CaptionDisplayLinesLabel" Margin="2,0,0,3" Text="Caption page lines" />
+                                            <ComboBox x:Name="CaptionDisplayLinesBox" Height="28" SelectionChanged="ImmediateSetting_SelectionChanged">
+                                                <ComboBoxItem Content="1" />
+                                                <ComboBoxItem Content="2" />
+                                                <ComboBoxItem Content="3" />
+                                                <ComboBoxItem Content="5" />
+                                                <ComboBoxItem Content="8" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock x:Name="OverlayDisplayLinesLabel" Margin="2,0,0,3" Text="Overlay lines" />
+                                            <ComboBox x:Name="OverlayDisplayLinesBox" Height="28" SelectionChanged="ImmediateSetting_SelectionChanged">
+                                                <ComboBoxItem Content="1" />
+                                                <ComboBoxItem Content="2" />
+                                                <ComboBoxItem Content="3" />
+                                                <ComboBoxItem Content="5" />
+                                                <ComboBoxItem Content="8" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock x:Name="OverlayOpacityLabel" Margin="2,7,0,3" Text="Opacity" />
+                                    <Slider x:Name="OverlayOpacitySlider" Minimum="0" Maximum="100" Value="100" ValueChanged="ImmediateSetting_ValueChanged" />
+                                    <CheckBox x:Name="OverlayClickThroughCheck" Height="24" Margin="0,6,0,0" Content="Click through" Checked="ImmediateSetting_CheckedChanged" Unchecked="ImmediateSetting_CheckedChanged" />
+                                    <UniformGrid Columns="2" Margin="0,6,0,0">
+                                        <Button x:Name="ResetOverlayButton" Height="28" Margin="0,0,4,0" Click="ResetOverlayButton_Click">Reset</Button>
+                                        <Button x:Name="OverlayColorsButton" Height="28" Margin="4,0,0,0" Click="OverlayColorsButton_Click">Colors</Button>
+                                    </UniformGrid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <Border Grid.Column="2" Style="{StaticResource SettingsGroupBorderStyle}">
                             <StackPanel>
-                                <TextBlock x:Name="SettingsAudioGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Audio" />
-                                <TextBlock x:Name="AudioSourcesLabel" Margin="2,0,0,4" Text="Audio Sources" />
-                                <ComboBox x:Name="InputModeBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
-                                    <ComboBoxItem x:Name="InputSystemMicItem" Content="System + Mic" Tag="SystemAndMic" />
-                                    <ComboBoxItem x:Name="InputSystemOnlyItem" Content="System Only" Tag="SystemAudioOnly" />
-                                    <ComboBoxItem x:Name="InputMixedDeviceItem" Content="Mixed Device" Tag="MixedDevice" />
+                                <TextBlock x:Name="SettingsSpeakerProcessingGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Speaker Processing" />
+                                <TextBlock x:Name="SettingsSpeakerDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                <Border Style="{StaticResource SettingsStateBorderStyle}">
+                                    <TextBlock x:Name="SpeakerProcessingStatusText" FontSize="10.5" TextWrapping="Wrap" />
+                                </Border>
+
+                                <TextBlock x:Name="SpeechSeparationSectionTitle" Style="{StaticResource SettingsSectionTitleStyle}" Margin="2,0,0,4" Text="Overlapping Voice Separation" />
+                                <TextBlock x:Name="SpeechSeparationDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                <TextBlock x:Name="SpeechSeparationLabel" Margin="2,0,0,3" Text="Separation Model" />
+                                <ComboBox x:Name="SpeechSeparationModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                    <ComboBoxItem Content="Auto recommendation" Tag="Auto" />
+                                    <ComboBoxItem Content="Off" Tag="None" />
                                 </ComboBox>
-                                <TextBlock x:Name="MicMonitorLabel" Margin="2,7,0,3" Text="Mic Monitor" />
-                                <Slider x:Name="MicMonitorSlider" Minimum="0" Maximum="100" Value="62" />
+                                <TextBlock x:Name="SpeechSeparationEffectiveText" Margin="2,4,0,0" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="HardwareSummaryText" Margin="2,3,0,0" Style="{StaticResource SettingsHintStyle}" Text="Detecting CPU and GPU..." />
+                                <TextBlock x:Name="SpeechSeparationRecommendationText" Margin="2,0,0,0" Style="{StaticResource SettingsHintStyle}" />
+                                <Button x:Name="RedetectHardwareButton" Height="24" Margin="0,2,0,0" Click="RedetectHardwareButton_Click">Detect again</Button>
+
+                                <Separator Margin="0,9,0,1" Background="{StaticResource BorderBrushSoft}" />
+                                <TextBlock x:Name="SpeakerIdentificationSectionTitle" Style="{StaticResource SettingsSectionTitleStyle}" Text="General Speaker Identification" />
+                                <TextBlock x:Name="SpeakerIdentificationDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+                                <TextBlock x:Name="DiarizationInactiveNoticeText" Margin="2,0,0,5" Foreground="{StaticResource AccentBrush}" FontSize="10.5" FontWeight="SemiBold" TextWrapping="Wrap" Visibility="Collapsed" />
+                                <StackPanel x:Name="DiarizationSettingsPanel">
+                                    <CheckBox x:Name="DiarizationCheck" Height="26" Content="On" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
+                                    <StackPanel x:Name="DiarizationConfigurationPanel">
+                                        <TextBlock x:Name="DiarizationModelLabel" Margin="2,5,0,3" Text="Diarization Model" />
+                                        <UniformGrid x:Name="DiarizationModelPanel" Columns="2" Margin="0,1,0,0">
+                                            <RadioButton x:Name="DiarizationCommunityRadio" GroupName="DiarizationModel" Height="26" Content="Community-1" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="DiarizationDiartRadio" GroupName="DiarizationModel" Height="26" Content="Diart" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="DiarizationSortformerRadio" GroupName="DiarizationModel" Height="26" Content="Sortformer" Checked="RestartSetting_CheckedChanged" />
+                                        </UniformGrid>
+                                        <TextBlock x:Name="DiarizationPresetLabel" Margin="2,7,0,3" Text="Diarization Preset" />
+                                        <UniformGrid Columns="3" Margin="0,1,0,0">
+                                            <RadioButton x:Name="DiarizationPresetSensitiveRadio" GroupName="DiarizationPreset" Height="26" Content="Sensitive" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="DiarizationPresetBalancedRadio" GroupName="DiarizationPreset" Height="26" Content="Balanced" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="DiarizationPresetStableRadio" GroupName="DiarizationPreset" Height="26" Content="Stable" Checked="RestartSetting_CheckedChanged" />
+                                        </UniformGrid>
+                                        <CheckBox x:Name="DiartManualCheck" Height="24" Margin="0,7,0,0" Content="Manual Diart tuning" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
+                                        <TextBlock x:Name="DiartManualDescriptionText" Margin="2,2,0,3" Style="{StaticResource SettingsHintStyle}" />
+                                        <Grid x:Name="DiartManualPanel">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="8" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock x:Name="DiartDurationLabel" Grid.Row="0" Grid.Column="0" Margin="2,4,0,2" Text="Duration" />
+                                            <TextBox x:Name="DiartDurationBox" Grid.Row="1" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                            <TextBlock x:Name="DiartStepLabel" Grid.Row="0" Grid.Column="2" Margin="2,4,0,2" Text="Step" />
+                                            <TextBox x:Name="DiartStepBox" Grid.Row="1" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                            <TextBlock x:Name="DiartLatencyLabel" Grid.Row="2" Grid.Column="0" Margin="2,6,0,2" Text="Latency" />
+                                            <TextBox x:Name="DiartLatencyBox" Grid.Row="3" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                            <TextBlock x:Name="DiartTauLabel" Grid.Row="2" Grid.Column="2" Margin="2,6,0,2" Text="Tau" />
+                                            <TextBox x:Name="DiartTauBox" Grid.Row="3" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                            <TextBlock x:Name="DiartRhoLabel" Grid.Row="4" Grid.Column="0" Margin="2,6,0,2" Text="Rho" />
+                                            <TextBox x:Name="DiartRhoBox" Grid.Row="5" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                            <TextBlock x:Name="DiartDeltaLabel" Grid.Row="4" Grid.Column="2" Margin="2,6,0,2" Text="Delta" />
+                                            <TextBox x:Name="DiartDeltaBox" Grid.Row="5" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                        </Grid>
+                                        <TextBlock x:Name="SpeakersLabel" Margin="2,7,0,3" Text="Speakers" />
+                                        <UniformGrid x:Name="SpeakerCountPanel" Columns="4" Margin="0,1,0,0">
+                                            <RadioButton x:Name="MaxSpeakers1Radio" Content="1" GroupName="SpeakerCount" Tag="auto:1" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers2Radio" Content="2" GroupName="SpeakerCount" Tag="auto:2" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers3Radio" Content="3" GroupName="SpeakerCount" Tag="auto:3" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers4Radio" Content="4" GroupName="SpeakerCount" Tag="auto:4" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers5Radio" Content="5" GroupName="SpeakerCount" Tag="auto:5" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers6Radio" Content="6" GroupName="SpeakerCount" Tag="auto:6" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers7Radio" Content="7" GroupName="SpeakerCount" Tag="auto:7" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="MaxSpeakers8Radio" Content="8" GroupName="SpeakerCount" Tag="auto:8" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        </UniformGrid>
+                                        <TextBlock x:Name="SpeakerModeLabel" Margin="2,6,0,2" Text="Speaker Mode" />
+                                        <UniformGrid x:Name="SpeakerCountModePanel" Columns="2" Margin="0,1,0,0">
+                                            <RadioButton x:Name="SpeakerModeActiveMaxRadio" Content="Max active" GroupName="SpeakerCountMode" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                            <RadioButton x:Name="SpeakerModeExactRadio" Content="Exact" GroupName="SpeakerCountMode" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
-                        <Border Style="{StaticResource SettingsGroupBorderStyle}">
-                            <StackPanel>
-                                <TextBlock x:Name="SettingsToolsGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Tools" />
-                                <TextBlock x:Name="ModelManagerLabel" Margin="2,0,0,4" Text="Model Manager" />
-                                <Button x:Name="ModelManagerButton" Height="28" Click="ModelManagerButton_Click">Open</Button>
-                                <TextBlock x:Name="DebugLabel" Margin="2,7,0,3" Text="Debug" />
-                                <Button x:Name="DebugButton" Height="28" Click="DebugButton_Click">Console</Button>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <Border Grid.Column="1" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
-                        <StackPanel>
-                            <TextBlock x:Name="SettingsModelGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Model" />
-                            <TextBlock x:Name="AsrEngineLabel" Margin="2,0,0,4" Text="ASR Engine" />
-                            <ComboBox x:Name="AsrEngineBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
-                                <ComboBoxItem x:Name="AsrEngineFasterWhisperItem" Content="Faster-Whisper" Tag="None" />
-                                <ComboBoxItem x:Name="AsrEngineQwenItem" Content="Qwen3-ASR + diarization" Tag="Qwen3Asr" />
-                                <ComboBoxItem x:Name="AsrEngineWhisperLiveKitItem" Content="WhisperLiveKit + Sortformer" Tag="WhisperLiveKitSortformer" />
-                                <ComboBoxItem x:Name="AsrEngineWhisperXItem" Content="WhisperX" Tag="WhisperX" />
-                            </ComboBox>
-                            <TextBlock x:Name="AsrEngineHintText"
-                                       Margin="2,4,0,0"
-                                       FontSize="10.5"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       TextWrapping="Wrap" />
-                            <TextBlock x:Name="SttModelLabel" Margin="2,7,0,4" Text="STT Model" />
-                            <ComboBox x:Name="SttModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
-                                <ComboBoxItem x:Name="SttDefaultItem" Content="Default" />
-                                <ComboBoxItem x:Name="SttTinyItem" Content="tiny" />
-                                <ComboBoxItem x:Name="SttBaseItem" Content="base" />
-                                <ComboBoxItem x:Name="SttSmallItem" Content="small" />
-                                <ComboBoxItem x:Name="SttMediumItem" Content="medium" />
-                                <ComboBoxItem x:Name="SttLargeV3Item" Content="large-v3" />
-                                <ComboBoxItem x:Name="SttLargeV3TurboItem" Content="large-v3-turbo" />
-                                <ComboBoxItem x:Name="SttQwen06BItem" Content="qwen3-asr-0.6b" />
-                                <ComboBoxItem x:Name="SttQwen17BItem" Content="qwen3-asr-1.7b" />
-                            </ComboBox>
-                            <TextBlock x:Name="SttLanguagesLabel" Margin="2,7,0,3" Text="STT Languages" />
-                            <Button x:Name="SttLanguagesButton" Height="28" Click="SttLanguagesButton_Click">Auto</Button>
-                            <TextBlock x:Name="ComputeLabel" Margin="2,7,0,3" Text="Compute" />
-                            <ComboBox x:Name="ComputeModeBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
-                                <ComboBoxItem x:Name="ComputeAutoItem" Content="Auto" Tag="Auto" />
-                                <ComboBoxItem Content="CPU" Tag="Cpu" />
-                                <ComboBoxItem Content="CUDA" Tag="Cuda" />
-                            </ComboBox>
-                            <TextBlock x:Name="SpeechSeparationLabel" Margin="2,7,0,3" Text="Overlapping Speech" />
-                            <ComboBox x:Name="SpeechSeparationModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
-                                <ComboBoxItem Content="Auto recommendation" Tag="Auto" />
-                                <ComboBoxItem Content="Off" Tag="None" />
-                            </ComboBox>
-                            <TextBlock x:Name="SpeechSeparationEffectiveText"
-                                       Margin="2,4,0,0"
-                                       FontSize="10.5"
-                                       FontWeight="SemiBold"
-                                       Foreground="{StaticResource AccentBrush}"
-                                       TextWrapping="Wrap" />
-                            <TextBlock x:Name="HardwareSummaryText"
-                                       Margin="2,3,0,0"
-                                       FontSize="10.5"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       TextWrapping="Wrap"
-                                       Text="Detecting CPU and GPU..." />
-                            <TextBlock x:Name="SpeechSeparationRecommendationText"
-                                       Margin="2,3,0,0"
-                                       FontSize="10.5"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       TextWrapping="Wrap" />
-                            <Button x:Name="RedetectHardwareButton"
-                                    Height="24"
-                                    Margin="0,5,0,0"
-                                    Click="RedetectHardwareButton_Click">Detect again</Button>
-                            <TextBlock x:Name="SttPresetLabel" Margin="2,7,0,3" Text="Preset" />
-                            <UniformGrid Columns="3" Margin="0,1,0,0">
-                                <RadioButton x:Name="SttPresetSpeedRadio"
-                                             GroupName="SttPreset"
-                                             Height="26"
-                                             Content="Sensitive"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="SttPresetDebateRadio"
-                                             GroupName="SttPreset"
-                                             Height="26"
-                                             Content="Balanced"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="SttPresetTalkShowRadio"
-                                             GroupName="SttPreset"
-                                             Height="26"
-                                             Content="Stable"
-                                             Checked="RestartSetting_CheckedChanged" />
-                            </UniformGrid>
-                            <TextBlock x:Name="SttPresetSummaryText"
-                                       MinHeight="16"
-                                       Margin="0,3,0,0"
-                                       FontSize="11"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="2" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
-                        <StackPanel>
-                            <TextBlock x:Name="SettingsDiarizationGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Diarization" />
-                            <TextBlock x:Name="DiarizationLabel" Margin="2,0,0,4" Text="Diarization" />
-                            <CheckBox x:Name="DiarizationCheck" Height="26" Content="On" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
-                            <TextBlock x:Name="DiarizationModelLabel" Margin="2,7,0,3" Text="Diarization Model" />
-                            <UniformGrid x:Name="DiarizationModelPanel" Columns="2" Margin="0,1,0,0">
-                                <RadioButton x:Name="DiarizationCommunityRadio"
-                                             GroupName="DiarizationModel"
-                                             Height="26"
-                                             Content="Community-1"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="DiarizationDiartRadio"
-                                             GroupName="DiarizationModel"
-                                             Height="26"
-                                             Content="Diart"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="DiarizationSortformerRadio"
-                                             GroupName="DiarizationModel"
-                                             Height="26"
-                                             Content="Sortformer"
-                                             Checked="RestartSetting_CheckedChanged" />
-                            </UniformGrid>
-                            <TextBlock x:Name="DiarizationPresetLabel" Margin="2,7,0,3" Text="Diarization Preset" />
-                            <UniformGrid Columns="3" Margin="0,1,0,0">
-                                <RadioButton x:Name="DiarizationPresetSensitiveRadio"
-                                             GroupName="DiarizationPreset"
-                                             Height="26"
-                                             Content="Sensitive"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="DiarizationPresetBalancedRadio"
-                                             GroupName="DiarizationPreset"
-                                             Height="26"
-                                             Content="Balanced"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="DiarizationPresetStableRadio"
-                                             GroupName="DiarizationPreset"
-                                             Height="26"
-                                             Content="Stable"
-                                             Checked="RestartSetting_CheckedChanged" />
-                            </UniformGrid>
-                            <CheckBox x:Name="DiartManualCheck"
-                                      Height="24"
-                                      Margin="0,7,0,0"
-                                      Content="Manual Diart tuning"
-                                      Checked="RestartSetting_CheckedChanged"
-                                      Unchecked="RestartSetting_CheckedChanged" />
-                            <TextBlock x:Name="DiartManualDescriptionText"
-                                       Margin="2,2,0,3"
-                                       FontSize="10.5"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       TextWrapping="Wrap" />
-                            <Grid x:Name="DiartManualPanel">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <TextBlock x:Name="DiartDurationLabel" Grid.Row="0" Grid.Column="0" Margin="2,4,0,2" Text="Duration" />
-                                <TextBox x:Name="DiartDurationBox" Grid.Row="1" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                <TextBlock x:Name="DiartStepLabel" Grid.Row="0" Grid.Column="2" Margin="2,4,0,2" Text="Step" />
-                                <TextBox x:Name="DiartStepBox" Grid.Row="1" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                <TextBlock x:Name="DiartLatencyLabel" Grid.Row="2" Grid.Column="0" Margin="2,6,0,2" Text="Latency" />
-                                <TextBox x:Name="DiartLatencyBox" Grid.Row="3" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                <TextBlock x:Name="DiartTauLabel" Grid.Row="2" Grid.Column="2" Margin="2,6,0,2" Text="Tau" />
-                                <TextBox x:Name="DiartTauBox" Grid.Row="3" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                <TextBlock x:Name="DiartRhoLabel" Grid.Row="4" Grid.Column="0" Margin="2,6,0,2" Text="Rho" />
-                                <TextBox x:Name="DiartRhoBox" Grid.Row="5" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                <TextBlock x:Name="DiartDeltaLabel" Grid.Row="4" Grid.Column="2" Margin="2,6,0,2" Text="Delta" />
-                                <TextBox x:Name="DiartDeltaBox" Grid.Row="5" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
-                            </Grid>
-                            <TextBlock x:Name="SpeakersLabel" Margin="2,7,0,3" Text="Speakers" />
-                            <UniformGrid x:Name="SpeakerCountPanel" Columns="4" Margin="0,1,0,0">
-                                <RadioButton x:Name="MaxSpeakers1Radio" Content="1" GroupName="SpeakerCount" Tag="auto:1" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers2Radio" Content="2" GroupName="SpeakerCount" Tag="auto:2" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers3Radio" Content="3" GroupName="SpeakerCount" Tag="auto:3" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers4Radio" Content="4" GroupName="SpeakerCount" Tag="auto:4" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers5Radio" Content="5" GroupName="SpeakerCount" Tag="auto:5" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers6Radio" Content="6" GroupName="SpeakerCount" Tag="auto:6" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers7Radio" Content="7" GroupName="SpeakerCount" Tag="auto:7" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="MaxSpeakers8Radio" Content="8" GroupName="SpeakerCount" Tag="auto:8" Height="23" Checked="RestartSetting_CheckedChanged" />
-                            </UniformGrid>
-                            <TextBlock x:Name="SpeakerModeLabel" Margin="2,6,0,2" Text="Speaker Mode" />
-                            <UniformGrid x:Name="SpeakerCountModePanel" Columns="2" Margin="0,1,0,0">
-                                <RadioButton x:Name="SpeakerModeActiveMaxRadio"
-                                             Content="Max active"
-                                             GroupName="SpeakerCountMode"
-                                             Height="23"
-                                             Checked="RestartSetting_CheckedChanged" />
-                                <RadioButton x:Name="SpeakerModeExactRadio"
-                                             Content="Exact"
-                                             GroupName="SpeakerCountMode"
-                                             Height="23"
-                                             Checked="RestartSetting_CheckedChanged" />
-                            </UniformGrid>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="3" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
-                        <StackPanel>
-                            <TextBlock x:Name="SettingsTranslationGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Translation" />
-                            <TextBlock x:Name="TranslateApiLabel" Margin="2,0,0,4" Text="Translate API" />
-                            <ComboBox x:Name="TranslateProviderBox" Height="28" SelectionChanged="TranslationSetting_SelectionChanged">
-                                <ComboBoxItem x:Name="TranslateProviderGoogleItem" Content="Google" Tag="Google" />
-                                <ComboBoxItem x:Name="TranslateProviderGoogle2Item" Content="Google2" Tag="Google2" />
-                                <ComboBoxItem x:Name="TranslateProviderOllamaItem" Content="Ollama" Tag="Ollama" />
-                                <ComboBoxItem x:Name="TranslateProviderOpenAIItem" Content="OpenAI" Tag="OpenAI" />
-                                <ComboBoxItem x:Name="TranslateProviderOpenRouterItem" Content="OpenRouter" Tag="OpenRouter" />
-                                <ComboBoxItem x:Name="TranslateProviderDeepLItem" Content="DeepL" Tag="DeepL" />
-                                <ComboBoxItem x:Name="TranslateProviderYoudaoItem" Content="Youdao" Tag="Youdao" />
-                                <ComboBoxItem x:Name="TranslateProviderBaiduItem" Content="Baidu" Tag="Baidu" />
-                                <ComboBoxItem x:Name="TranslateProviderMTranServerItem" Content="MTranServer" Tag="MTranServer" />
-                                <ComboBoxItem x:Name="TranslateProviderLibreTranslateItem" Content="LibreTranslate" Tag="LibreTranslate" />
-                            </ComboBox>
-                            <TextBlock x:Name="TargetLanguageLabel" Margin="2,7,0,3" Text="Target Language" />
-                            <ComboBox x:Name="TargetLanguageBox" Height="28" MaxDropDownHeight="220" SelectionChanged="TranslationSetting_SelectionChanged">
-                                <ComboBoxItem Content="ko-KR" Tag="ko" />
-                                <ComboBoxItem Content="en-US" Tag="en" />
-                                <ComboBoxItem Content="en-GB" Tag="en" />
-                                <ComboBoxItem Content="ja-JP" Tag="ja" />
-                                <ComboBoxItem Content="zh-CN" Tag="zh-CN" />
-                                <ComboBoxItem Content="zh-TW" Tag="zh-TW" />
-                                <ComboBoxItem Content="fr-FR" Tag="fr" />
-                                <ComboBoxItem Content="de-DE" Tag="de" />
-                                <ComboBoxItem Content="th-TH" Tag="th" />
-                                <ComboBoxItem Content="ru-RU" Tag="ru" />
-                                <ComboBoxItem Content="es-ES" Tag="es" />
-                                <ComboBoxItem Content="pt-BR" Tag="pt" />
-                                <ComboBoxItem Content="tr-TR" Tag="tr" />
-                                <ComboBoxItem Content="ar-SA" Tag="ar" />
-                            </ComboBox>
-                            <Button x:Name="TranslateApiSettingsButton" Height="27" Margin="0,6,0,0" Click="TranslateApiSettingsButton_Click">Open</Button>
-                            <TextBlock x:Name="CaptionDisplayModeLabel" Margin="2,7,0,2" Text="Display" />
-                            <RadioButton x:Name="DisplayOriginalRadio" Height="19" Content="Original" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
-                            <RadioButton x:Name="DisplayTranslatedRadio" Height="19" Content="Translated" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
-                            <RadioButton x:Name="DisplayBothRadio" Height="19" Content="Both" GroupName="CaptionDisplayMode" Checked="ImmediateSetting_CheckedChanged" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="4" Style="{StaticResource SettingsGroupBorderStyle}">
-                        <StackPanel>
-                            <TextBlock x:Name="SettingsOverlayGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Overlay" />
-                            <TextBlock x:Name="OverlaySettingsLabel" Margin="2,0,0,4" Text="Overlay" />
-                            <Button x:Name="ResetOverlayButton" Height="28" Click="ResetOverlayButton_Click">Reset</Button>
-                            <Button x:Name="OverlayColorsButton" Height="27" Margin="0,6,0,0" Click="OverlayColorsButton_Click">Colors</Button>
-                            <TextBlock x:Name="CaptionDisplayLinesLabel" Margin="2,7,0,3" Text="Caption page lines" />
-                            <ComboBox x:Name="CaptionDisplayLinesBox" Height="28" SelectionChanged="ImmediateSetting_SelectionChanged">
-                                <ComboBoxItem Content="1" />
-                                <ComboBoxItem Content="2" />
-                                <ComboBoxItem Content="3" />
-                                <ComboBoxItem Content="5" />
-                                <ComboBoxItem Content="8" />
-                            </ComboBox>
-                            <TextBlock x:Name="OverlayDisplayLinesLabel" Margin="2,7,0,3" Text="Overlay lines" />
-                            <ComboBox x:Name="OverlayDisplayLinesBox" Height="28" SelectionChanged="ImmediateSetting_SelectionChanged">
-                                <ComboBoxItem Content="1" />
-                                <ComboBoxItem Content="2" />
-                                <ComboBoxItem Content="3" />
-                                <ComboBoxItem Content="5" />
-                                <ComboBoxItem Content="8" />
-                            </ComboBox>
-                            <TextBlock x:Name="OverlayOpacityLabel" Margin="2,7,0,3" Text="Opacity" />
-                            <Slider x:Name="OverlayOpacitySlider"
-                                    Minimum="0"
-                                    Maximum="100"
-                                    Value="100"
-                                    ValueChanged="ImmediateSetting_ValueChanged" />
-                            <CheckBox x:Name="OverlayClickThroughCheck"
-                                      Height="24"
-                                      Margin="0,6,0,0"
-                                      Content="Click through"
-                                      Checked="ImmediateSetting_CheckedChanged"
-                                      Unchecked="ImmediateSetting_CheckedChanged" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
+                    </Grid>
+                </ScrollViewer>
 
                 <Border x:Name="InfoPanel"
                         Margin="6,6,15,5"

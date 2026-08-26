@@ -183,16 +183,22 @@ public partial class MainWindow : Window
         DetailStatusText.Text = L("Ready");
 
         SettingsAudioGroupTitle.Text = L("SettingsAudioGroup");
-        SettingsModelGroupTitle.Text = L("SettingsAsrGroup");
-        SettingsDiarizationGroupTitle.Text = L("SettingsDiarizationModelGroup");
+        SettingsAsrGroupTitle.Text = L("SettingsAsrGroup");
+        SettingsSpeakerProcessingGroupTitle.Text = L("SettingsSpeakerProcessingGroup");
         SettingsTranslationGroupTitle.Text = L("SettingsTranslationGroup");
-        SettingsOverlayGroupTitle.Text = L("SettingsOverlayGroup");
+        SettingsOutputGroupTitle.Text = L("SettingsOverlayGroup");
         SettingsToolsGroupTitle.Text = L("SettingsToolsGroup");
+        SettingsAudioDescriptionText.Text = L("SettingsAudioDescription");
+        SettingsAsrDescriptionText.Text = L("SettingsAsrDescription");
+        SettingsSpeakerDescriptionText.Text = L("SettingsSpeakerDescription");
+        SettingsTranslationDescriptionText.Text = L("SettingsTranslationDescription");
+        SettingsOutputDescriptionText.Text = L("SettingsOutputDescription");
+        SettingsToolsDescriptionText.Text = L("SettingsToolsDescription");
         AudioSourcesLabel.Text = L("AudioSources");
         InputSystemMicItem.Content = L("SystemMic");
         InputSystemOnlyItem.Content = L("SystemOnly");
         InputMixedDeviceItem.Content = L("MixedDevice");
-        MicMonitorLabel.Text = L("MicMonitor");
+        AudioInputSummaryText.Text = L("AudioInputSystemMicSummary");
         AsrEngineLabel.Text = L("AsrEngine");
         AsrEngineFasterWhisperItem.Content = L("FasterWhisper");
         AsrEngineQwenItem.Content = L("QwenAsr");
@@ -208,7 +214,9 @@ public partial class MainWindow : Window
         SttPresetTalkShowRadio.Content = L("Stable");
         ComputeLabel.Text = L("Compute");
         ComputeAutoItem.Content = L("Auto");
-        SpeechSeparationLabel.Text = L("SpeechSeparation");
+        SpeechSeparationSectionTitle.Text = L("SpeechSeparationSection");
+        SpeechSeparationDescriptionText.Text = L("SpeechSeparationDescription");
+        SpeechSeparationLabel.Text = L("SpeechSeparationModel");
         RedetectHardwareButton.Content = L("DetectHardwareAgain");
         HardwareSummaryText.Text = L("DetectingHardware");
         ModelManagerLabel.Text = L("ModelManager");
@@ -216,7 +224,6 @@ public partial class MainWindow : Window
         DebugLabel.Text = L("Debug");
         DebugButton.Content = L("Console");
         DebugButton.ToolTip = L("OpenConsole");
-        OverlaySettingsLabel.Text = L("Overlay");
         ResetOverlayButton.Content = L("OverlayReset");
         ResetOverlayButton.ToolTip = L("OverlayResetTooltip");
         OverlayColorsButton.Content = L("OverlayColors");
@@ -232,8 +239,10 @@ public partial class MainWindow : Window
         SpeakerModeExactRadio.ToolTip = L("SpeakerModeHelp");
         CaptionDisplayLinesLabel.Text = L("CaptionDisplayLines");
         OverlayDisplayLinesLabel.Text = L("OverlayDisplayLines");
-        DiarizationLabel.Text = L("Diarization");
-        DiarizationCheck.Content = L("On");
+        SpeakerIdentificationSectionTitle.Text = L("SpeakerIdentificationSection");
+        SpeakerIdentificationDescriptionText.Text = L("SpeakerIdentificationDescription");
+        DiarizationInactiveNoticeText.Text = L("SpeakerIdentificationPaused");
+        DiarizationCheck.Content = L("SpeakerIdentificationEnabled");
         DiarizationModelLabel.Text = L("DiarizationModel");
         DiarizationCommunityRadio.Content = L("PyannoteCommunity");
         DiarizationDiartRadio.Content = L("DiartRealtime");
@@ -264,7 +273,17 @@ public partial class MainWindow : Window
         DiartDeltaBox.ToolTip = L("DiartDeltaNewHelp");
         TranslateApiLabel.Text = L("TranslateApi");
         TargetLanguageLabel.Text = L("TargetLanguage");
-        TranslateApiSettingsButton.Content = L("Open");
+        TranslationProviderAvailabilityText.Text = L("TranslationProviderAvailability");
+        SetUnavailableTranslationProviderItem(TranslateProviderGoogle2Item, "Google2");
+        SetUnavailableTranslationProviderItem(TranslateProviderOllamaItem, "Ollama");
+        SetUnavailableTranslationProviderItem(TranslateProviderOpenAIItem, "OpenAI");
+        SetUnavailableTranslationProviderItem(TranslateProviderOpenRouterItem, "OpenRouter");
+        SetUnavailableTranslationProviderItem(TranslateProviderDeepLItem, "DeepL");
+        SetUnavailableTranslationProviderItem(TranslateProviderYoudaoItem, "Youdao");
+        SetUnavailableTranslationProviderItem(TranslateProviderBaiduItem, "Baidu");
+        SetUnavailableTranslationProviderItem(TranslateProviderMTranServerItem, "MTranServer");
+        SetUnavailableTranslationProviderItem(TranslateProviderLibreTranslateItem, "LibreTranslate");
+        TranslateApiSettingsButton.Content = L("TranslationSupportInfo");
         TranslateApiSettingsButton.ToolTip = L("ApiSetting");
         CaptionDisplayModeLabel.Text = L("CaptionDisplayMode");
         DisplayOriginalRadio.Content = L("DisplayOriginal");
@@ -278,6 +297,12 @@ public partial class MainWindow : Window
         ConsoleKeepBottomButton.ToolTip = L("KeepConsoleAtBottom");
 
         ApplyInfoLocalization();
+    }
+
+    private void SetUnavailableTranslationProviderItem(ComboBoxItem item, string providerName)
+    {
+        item.Content = LF("TranslationProviderUnavailableItem", providerName);
+        item.ToolTip = L("TranslationProviderUnavailable");
     }
 
     private void ApplyInfoLocalization()
@@ -1174,9 +1199,17 @@ public partial class MainWindow : Window
         }
 
         ApplyAsrEngineUiState(normalizeSelection: true);
+        if (sender == InputModeBox)
+        {
+            UpdateAudioInputUiState();
+        }
         if (sender == ComputeModeBox || sender == AsrEngineBox || sender == SttModelBox || sender == SpeechSeparationModelBox)
         {
             UpdateSpeechSeparationRecommendation(normalizeSelection: true);
+        }
+        else
+        {
+            UpdateSpeakerProcessingUiState();
         }
         UpdateDiartManualControls();
         UpdateSttPresetSummary();
@@ -1187,6 +1220,7 @@ public partial class MainWindow : Window
     {
         NormalizeDiarizationForSpeakerCount();
         ApplyAsrEngineUiState(normalizeSelection: true);
+        UpdateSpeakerProcessingUiState();
         UpdateDiartManualControls();
         UpdateSttPresetSummary();
         _ = QueueSettingsApplyAsync(restartIfRunning: true);
@@ -1288,6 +1322,17 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateAudioInputUiState()
+    {
+        var inputMode = ParseSelectedTag(InputModeBox, settings.InputMode);
+        AudioInputSummaryText.Text = inputMode switch
+        {
+            CoreInputMode.SystemAudioOnly => L("AudioInputSystemOnlySummary"),
+            CoreInputMode.MixedDevice => L("AudioInputMixedDeviceSummary"),
+            _ => L("AudioInputSystemMicSummary")
+        };
+    }
+
     private void UpdateSpeechSeparationRecommendation(bool normalizeSelection)
     {
         if (!hardwareDetectionComplete)
@@ -1315,6 +1360,7 @@ public partial class MainWindow : Window
 
         PopulateSpeechSeparationModelItems(requested, computeMode, asrEngine, sttModel);
         UpdateEffectiveSpeechSeparationText(requested);
+        UpdateSpeakerProcessingUiState(requested);
         var gpu = hardwareProfile.HasNvidiaGpu
             ? LF("HardwareGpuSummary", hardwareProfile.GpuName ?? "NVIDIA GPU", hardwareProfile.GpuMemoryGiB)
             : L("HardwareNoSupportedGpu");
@@ -1338,6 +1384,9 @@ public partial class MainWindow : Window
                 "SpeechSeparationUnavailable",
                 LocalizedSpeechSeparationReason(computeMode, asrEngine));
         }
+
+        UpdateDiartManualControls();
+        UpdateSttPresetSummary();
     }
 
     private void PopulateSpeechSeparationModelItems(
@@ -1423,6 +1472,64 @@ public partial class MainWindow : Window
                 SpeechSeparationAdvisor.DisplayName(effective)),
             _ => L("SpeechSeparationEffectiveOff")
         };
+    }
+
+    private void UpdateSpeakerProcessingUiState(SpeechSeparationModel? requested = null)
+    {
+        if (DiarizationSettingsPanel is null ||
+            DiarizationConfigurationPanel is null ||
+            DiarizationInactiveNoticeText is null ||
+            SpeakerProcessingStatusText is null)
+        {
+            return;
+        }
+
+        var selectedSeparation = requested ?? ParseSelectedTag(
+            SpeechSeparationModelBox,
+            settings.SpeechSeparationModel);
+        var effectiveSeparation = SpeechSeparationAdvisor.Resolve(
+            selectedSeparation,
+            speechSeparationRecommendation);
+        var separationActive = effectiveSeparation != SpeechSeparationModel.None;
+        var identificationEnabled = DiarizationCheck.IsChecked == true;
+
+        DiarizationSettingsPanel.IsEnabled = !separationActive;
+        DiarizationSettingsPanel.Opacity = separationActive ? 0.48 : 1.0;
+        DiarizationInactiveNoticeText.Visibility = separationActive
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        DiarizationConfigurationPanel.IsEnabled = !separationActive && identificationEnabled;
+        DiarizationConfigurationPanel.Opacity = identificationEnabled ? 1.0 : 0.48;
+
+        if (separationActive)
+        {
+            SpeakerProcessingStatusText.Text = LF(
+                "SpeakerProcessingStatusSeparation",
+                SpeechSeparationAdvisor.DisplayName(effectiveSeparation));
+            return;
+        }
+
+        SpeakerProcessingStatusText.Text = identificationEnabled
+            ? LF("SpeakerProcessingStatusIdentification", LocalizedDiarizationModelName(SelectedDiarizationModel()))
+            : L("SpeakerProcessingStatusOff");
+    }
+
+    private string LocalizedDiarizationModelName(DiarizationModel model)
+    {
+        return model switch
+        {
+            DiarizationModel.Diart => L("DiartRealtime"),
+            DiarizationModel.Sortformer => L("Sortformer"),
+            _ => L("PyannoteCommunity")
+        };
+    }
+
+    private SpeechSeparationModel SelectedEffectiveSpeechSeparationModel()
+    {
+        var requested = ParseSelectedTag(
+            SpeechSeparationModelBox,
+            settings.SpeechSeparationModel);
+        return SpeechSeparationAdvisor.Resolve(requested, speechSeparationRecommendation);
     }
 
     private string LocalizedSpeechSeparationAssessment(SpeechSeparationAssessment assessment)
@@ -1689,6 +1796,7 @@ public partial class MainWindow : Window
         try
         {
             SelectByTag(InputModeBox, settings.InputMode.ToString());
+            UpdateAudioInputUiState();
             SelectByTag(AsrEngineBox, settings.AsrEngine.ToString());
             SelectByContent(SttModelBox, settings.SttModel);
             UpdateSttLanguagesButton();
@@ -1721,6 +1829,7 @@ public partial class MainWindow : Window
             SetDoubleText(DiartDeltaBox, settings.DiartDeltaNew);
             ApplyAsrEngineUiState(normalizeSelection: true);
             NormalizeAsrEngineSettings();
+            UpdateSpeakerProcessingUiState();
             UpdateDiartManualControls();
             UpdateSttPresetSummary();
         }
@@ -1964,6 +2073,17 @@ public partial class MainWindow : Window
         var beamSize = SttBeamSizeForPreset(sttQuality);
         var wordTimestamps = sttQuality >= 75 ? L("SttPresetWordOn") : L("SttPresetWordOff");
         var selectedEngine = ParseSelectedTag(AsrEngineBox, settings.AsrEngine);
+        var effectiveSeparation = SelectedEffectiveSpeechSeparationModel();
+        if (effectiveSeparation != SpeechSeparationModel.None)
+        {
+            SttPresetSummaryText.Text = LF(
+                "SttPresetSummarySeparated",
+                sttPresetName,
+                sttChunkSeconds,
+                beamSize,
+                SpeechSeparationAdvisor.DisplayName(effectiveSeparation));
+            return;
+        }
         if (selectedEngine == AsrEngine.WhisperLiveKitSortformer)
         {
             SttPresetSummaryText.Text = LF("SttPresetSummaryWhisperLiveKit", sttPresetName, sttChunkSeconds, beamSize);
@@ -2009,7 +2129,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var isDiart = SelectedDiarizationModel() == DiarizationModel.Diart;
+        var speakerIdentificationAvailable = DiarizationSettingsPanel.IsEnabled &&
+            DiarizationCheck.IsChecked == true;
+        var isDiart = speakerIdentificationAvailable &&
+            SelectedDiarizationModel() == DiarizationModel.Diart;
         var enabled = isDiart && DiartManualCheck.IsChecked == true;
         DiartManualCheck.IsEnabled = isDiart;
         DiartManualCheck.Visibility = isDiart ? Visibility.Visible : Visibility.Collapsed;
