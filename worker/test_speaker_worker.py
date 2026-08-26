@@ -892,6 +892,31 @@ print("ok")
         self.assertFalse(payload["sttModelLoadable"])
         self.assertEqual("huggingface-hub must be below 1.0", payload["sttModelError"])
 
+    def test_qwen_runtime_check_imports_qwen_model_class(self) -> None:
+        original_has_module = speaker_worker.has_module
+        original_import_module = speaker_worker.importlib.import_module
+        imported_modules: list[str] = []
+
+        def fake_import_module(name: str):
+            imported_modules.append(name)
+            if name == "qwen_asr":
+                raise TypeError("check_model_inputs() missing 1 required positional argument: 'func'")
+            raise AssertionError(f"unexpected import: {name}")
+
+        speaker_worker.has_module = lambda name: name == "qwen_asr"
+        speaker_worker.importlib.import_module = fake_import_module
+        try:
+            error = speaker_worker.qwen_asr_runtime_error()
+        finally:
+            speaker_worker.has_module = original_has_module
+            speaker_worker.importlib.import_module = original_import_module
+
+        self.assertEqual(["qwen_asr"], imported_modules)
+        self.assertEqual(
+            "check_model_inputs() missing 1 required positional argument: 'func'",
+            error,
+        )
+
     def test_check_environment_accepts_whisperlivekit_default_model(self) -> None:
         original_has_module = speaker_worker.has_module
         original_materialize = speaker_worker.materialize_model_cache_links

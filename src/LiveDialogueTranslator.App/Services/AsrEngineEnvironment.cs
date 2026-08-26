@@ -25,7 +25,9 @@ public static class AsrEngineEnvironment
 
         environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = WorkerProtocol.FormatAsrEngine(engine);
 
-        var packageDirectories = OrderAsrPackageEngines(RequiredAsrEngines(engine, diarizationModel, diarizationEnabled))
+        var packageDirectories = OrderAsrPackageEngines(
+                RequiredAsrEngines(engine, diarizationModel, diarizationEnabled),
+                engine)
             .Select(paths.AsrPackageDirectory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -56,9 +58,11 @@ public static class AsrEngineEnvironment
         return engines;
     }
 
-    private static IEnumerable<AsrEngine> OrderAsrPackageEngines(IEnumerable<AsrEngine> engines)
+    private static IEnumerable<AsrEngine> OrderAsrPackageEngines(
+        IEnumerable<AsrEngine> engines,
+        AsrEngine selectedEngine)
     {
-        return engines.OrderBy(engine => engine == AsrEngine.WhisperLiveKitSortformer ? 0 : 1);
+        return engines.OrderBy(candidate => candidate == selectedEngine ? 0 : 1);
     }
 
     public static string RequirementsPath(AsrEngine engine)

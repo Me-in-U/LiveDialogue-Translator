@@ -4917,7 +4917,8 @@ def qwen_asr_runtime_error() -> str | None:
         return "qwen-asr package is not installed."
 
     try:
-        importlib.import_module("transformers")
+        qwen_asr = importlib.import_module("qwen_asr")
+        getattr(qwen_asr, "Qwen3ASRModel")
     except Exception as exc:
         return str(exc)
     return None

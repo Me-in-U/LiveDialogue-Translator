@@ -99,7 +99,7 @@ var tests = new (string Name, Action Body)[]
     ("settings store passes speaker count mode to worker configuration", SettingsStorePassesSpeakerCountModeToWorkerConfiguration),
     ("worker environment does not export stt engine to setup checks", WorkerEnvironmentDoesNotExportSttEngineToSetupChecks),
     ("settings model has no stt engine", SettingsModelHasNoSttEngine),
-    ("ASR engine environment prioritizes sortformer dependency site", AsrEngineEnvironmentPrioritizesSortformerDependencySite),
+    ("ASR engine environment prioritizes selected engine dependency site", AsrEngineEnvironmentPrioritizesSelectedEngineDependencySite),
     ("overlay groups captions by speaker and fades inactive speakers", OverlayGroupsCaptionsBySpeakerAndFadesInactiveSpeakers),
     ("overlay caps visible text rows per speaker", OverlayCapsVisibleTextRowsPerSpeaker),
     ("caption page caps visible text rows per speaker", CaptionPageCapsVisibleTextRowsPerSpeaker),
@@ -1735,12 +1735,12 @@ static void SettingsModelHasNoSttEngine()
     Assert.True(!store.Contains("settings.SttEngine", StringComparison.Ordinal), "Worker configuration should always use local Whisper without a stored engine value.");
 }
 
-static void AsrEngineEnvironmentPrioritizesSortformerDependencySite()
+static void AsrEngineEnvironmentPrioritizesSelectedEngineDependencySite()
 {
     var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "AsrEngineEnvironment.cs"));
 
     Assert.Contains("OrderAsrPackageEngines", source);
-    Assert.Contains("AsrEngine.WhisperLiveKitSortformer ? 0 : 1", source);
+    Assert.Contains("candidate == selectedEngine ? 0 : 1", source);
     Assert.Contains(".Select(paths.AsrPackageDirectory)", source);
 }
 
