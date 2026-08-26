@@ -603,6 +603,7 @@ class LocalSpeechEngine:
             or previous.stt_quality_preset != next_config.stt_quality_preset
             or previous.compute_mode != next_config.compute_mode
             or previous.asr_engine != next_config.asr_engine
+            or previous.speech_separation_model != next_config.speech_separation_model
         )
         diarization_changed = (
             previous.compute_mode != next_config.compute_mode
@@ -767,10 +768,15 @@ class LocalSpeechEngine:
     def ensure_loaded(self) -> None:
         if self._uses_qwen_asr() and self.qwen_model is None:
             try:
-                self.qwen_model = load_qwen_asr_model(self.config.stt_model, self._resolve_stt_device())
+                use_aligner = self._qwen_aligner_enabled()
+                self.qwen_model = load_qwen_asr_model(
+                    self.config.stt_model,
+                    self._resolve_stt_device(),
+                    use_aligner=use_aligner,
+                )
                 self.whisper_model = True
                 self.last_stt_error = None
-                aligner_message = " + ForcedAligner" if qwen_forced_aligner_enabled() else ""
+                aligner_message = " + ForcedAligner" if use_aligner else ""
                 emit({"type": "model_status", "stage": "stt_loaded", "message": f"Qwen3-ASR {qwen_asr_model_id(self.config.stt_model)}{aligner_message}", "progress": 1})
             except Exception as exc:
                 self.qwen_model = False
@@ -1019,27 +1025,38 @@ class LocalSpeechEngine:
         if not separated_stems_contain_overlap(stems):
             return False
 
+        prepared_stems: list[tuple[int, float, Any, bytes, Path]] = []
         results: list[tuple[int, float, str, int, int]] = []
-        for channel, stem in enumerate(stems):
-            stem_pcm = float_waveform_to_pcm(stem)
-            stt_audio = preprocess_stt_pcm(stem_pcm)
-            if stt_audio is None:
-                continue
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
-                wav_path = Path(temp.name)
-            try:
+        try:
+            for channel, stem in enumerate(stems):
+                stem_pcm = float_waveform_to_pcm(stem)
+                stt_audio = preprocess_stt_pcm(stem_pcm)
+                if stt_audio is None:
+                    continue
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
+                    wav_path = Path(temp.name)
+                prepared_stems.append((channel, waveform_rms(stem), stt_audio, stem_pcm, wav_path))
                 write_wav(wav_path, stt_audio.pcm)
-                text = join_text_parts(self._transcribe_wav_parts(wav_path))
-            finally:
+
+            wav_paths = [item[4] for item in prepared_stems]
+            if self._uses_qwen_asr() and len(wav_paths) > 1:
+                text_part_groups = self._transcribe_qwen_wav_parts_batch(wav_paths)
+            else:
+                text_part_groups = [self._transcribe_wav_parts(wav_path) for wav_path in wav_paths]
+
+            for (channel, rms, stt_audio, stem_pcm, _wav_path), text_parts in zip(prepared_stems, text_part_groups):
+                text = join_text_parts(text_parts)
+                if not text:
+                    continue
+                start_ms = timestamp_ms + stt_audio.leading_trim_ms
+                end_ms = max(start_ms + 1, timestamp_ms + int(len(stem_pcm) / BYTES_PER_SECOND * 1000) - stt_audio.trailing_trim_ms)
+                results.append((channel, rms, text, start_ms, end_ms))
+        finally:
+            for _channel, _rms, _stt_audio, _stem_pcm, wav_path in prepared_stems:
                 try:
                     wav_path.unlink(missing_ok=True)
                 except Exception:
                     pass
-            if not text:
-                continue
-            start_ms = timestamp_ms + stt_audio.leading_trim_ms
-            end_ms = max(start_ms + 1, timestamp_ms + int(len(stem_pcm) / BYTES_PER_SECOND * 1000) - stt_audio.trailing_trim_ms)
-            results.append((channel, waveform_rms(stem), text, start_ms, end_ms))
 
         if not results:
             return False
@@ -1371,7 +1388,9 @@ class LocalSpeechEngine:
             return self._transcribe_qwen_fallback_or_stop(wav_path, self.qwen_disabled_reason)
 
         language = qwen_language_name(self._primary_language())
-        return_time_stamps = language is None or qwen_forced_aligner_supports_language(language)
+        return_time_stamps = self._qwen_aligner_enabled() and (
+            language is None or qwen_forced_aligner_supports_language(language)
+        )
         parts = self._transcribe_qwen_wav_parts_once(wav_path, language, return_time_stamps)
         if parts is None:
             return self._transcribe_qwen_fallback_or_stop(wav_path, self.qwen_disabled_reason or "Qwen-ASR timed out.")
@@ -1394,26 +1413,60 @@ class LocalSpeechEngine:
         results = self._call_qwen_transcribe_with_timeout(wav_path, language, return_time_stamps)
         if results is None:
             return None
-        slow_seconds = qwen_slow_fallback_seconds()
-        if self.last_qwen_call_seconds >= slow_seconds:
-            self.qwen_disabled_reason = self._qwen_asr_failure_reason(f"Qwen-ASR too slow ({self.last_qwen_call_seconds:.1f}s >= {slow_seconds:g}s)")
-            if not self.qwen_slow_debug_emitted:
-                self.qwen_slow_debug_emitted = True
-                emit({
-                    "type": "model_status",
-                    "stage": "qwen_slow",
-                    "message": self.qwen_disabled_reason,
-                    "progress": 0,
-                })
-            if not self._qwen_fallback_allowed():
-                self._stop_for_qwen_asr_failure(self.qwen_disabled_reason)
-            return None
+        self._record_slow_qwen_result()
         result = results[0] if isinstance(results, list) else results
         parts = timed_text_parts_for_qwen_result(result, wav_duration_ms(wav_path))
         result_language = str(getattr(result, "language", "") or language or "")
         return punctuate_qwen_text_parts(parts, result_language)
 
-    def _call_qwen_transcribe_with_timeout(self, wav_path: Path, language: str | None, return_time_stamps: bool) -> Any | None:
+    def _transcribe_qwen_wav_parts_batch(self, wav_paths: list[Path]) -> list[list[TimedTextPart]]:
+        if not wav_paths:
+            return []
+        if not self.qwen_model or self.qwen_model is False:
+            return [[] for _path in wav_paths]
+        if self.qwen_disabled_reason:
+            return [self._transcribe_qwen_fallback_or_stop(path, self.qwen_disabled_reason) for path in wav_paths]
+
+        language = qwen_language_name(self._primary_language())
+        results = self._call_qwen_transcribe_with_timeout(wav_paths, language, False)
+        if results is None:
+            reason = self.qwen_disabled_reason or "Qwen-ASR timed out."
+            return [self._transcribe_qwen_fallback_or_stop(path, reason) for path in wav_paths]
+
+        self._record_slow_qwen_result()
+        result_items = results if isinstance(results, list) else [results]
+        if len(result_items) != len(wav_paths):
+            reason = f"Qwen-ASR returned {len(result_items)} results for {len(wav_paths)} separated channels."
+            return [self._transcribe_qwen_fallback_or_stop(path, reason) for path in wav_paths]
+
+        groups: list[list[TimedTextPart]] = []
+        for wav_path, result in zip(wav_paths, result_items):
+            parts = timed_text_parts_for_qwen_result(result, wav_duration_ms(wav_path))
+            result_language = str(getattr(result, "language", "") or language or "")
+            punctuated = punctuate_qwen_text_parts(parts, result_language)
+            groups.append(punctuated or self._transcribe_qwen_fallback_or_stop(wav_path))
+        self._emit_qwen_alignment_debug(False, [part for group in groups for part in group])
+        return groups
+
+    def _record_slow_qwen_result(self) -> None:
+        slow_seconds = qwen_slow_fallback_seconds()
+        if self.last_qwen_call_seconds < slow_seconds:
+            return
+        self.qwen_disabled_reason = self._qwen_future_fallback_reason(
+            f"Qwen-ASR too slow ({self.last_qwen_call_seconds:.1f}s >= {slow_seconds:g}s)"
+        )
+        if not self.qwen_slow_debug_emitted:
+            self.qwen_slow_debug_emitted = True
+            emit({
+                "type": "model_status",
+                "stage": "qwen_slow",
+                "message": self.qwen_disabled_reason,
+                "progress": 0,
+            })
+        if not self._qwen_fallback_allowed():
+            self._stop_for_qwen_asr_failure(self.qwen_disabled_reason)
+
+    def _call_qwen_transcribe_with_timeout(self, wav_path: Path | list[Path], language: str | None, return_time_stamps: bool) -> Any | None:
         if threading.current_thread().name == ASR_THREAD_NAME:
             return self._call_qwen_transcribe_in_asr_worker(wav_path, language, return_time_stamps)
 
@@ -1424,7 +1477,7 @@ class LocalSpeechEngine:
         def run_transcribe() -> None:
             try:
                 result_box["results"] = self.qwen_model.transcribe(
-                    audio=str(wav_path),
+                    audio=qwen_audio_input(wav_path),
                     context=qwen_transcription_context(),
                     language=language,
                     return_time_stamps=return_time_stamps,
@@ -1455,19 +1508,18 @@ class LocalSpeechEngine:
         self.last_qwen_call_seconds = time.perf_counter() - started
         return result_box.get("results")
 
-    def _call_qwen_transcribe_in_asr_worker(self, wav_path: Path, language: str | None, return_time_stamps: bool) -> Any | None:
+    def _call_qwen_transcribe_in_asr_worker(self, wav_path: Path | list[Path], language: str | None, return_time_stamps: bool) -> Any | None:
         timeout_seconds = qwen_timeout_seconds()
         started = time.perf_counter()
         finished = threading.Event()
-        timed_out = False
 
         def report_long_running_call() -> None:
-            nonlocal timed_out
             if finished.is_set():
                 return
-            timed_out = True
             self.last_qwen_call_seconds = timeout_seconds
-            self.qwen_disabled_reason = self._qwen_asr_failure_reason(f"Qwen-ASR timed out after {timeout_seconds:g}s")
+            self.qwen_disabled_reason = self._qwen_future_fallback_reason(
+                f"Qwen-ASR timed out after {timeout_seconds:g}s"
+            )
             if not self.qwen_timeout_debug_emitted:
                 self.qwen_timeout_debug_emitted = True
                 emit({
@@ -1490,7 +1542,7 @@ class LocalSpeechEngine:
         timer.start()
         try:
             results = self.qwen_model.transcribe(
-                audio=str(wav_path),
+                audio=qwen_audio_input(wav_path),
                 context=qwen_transcription_context(),
                 language=language,
                 return_time_stamps=return_time_stamps,
@@ -1500,8 +1552,6 @@ class LocalSpeechEngine:
             timer.cancel()
 
         self.last_qwen_call_seconds = time.perf_counter() - started
-        if timed_out:
-            return None
         return results
 
     def _transcribe_qwen_fallback_or_stop(self, wav_path: Path, reason: str | None = None) -> list[TimedTextPart]:
@@ -1514,6 +1564,9 @@ class LocalSpeechEngine:
 
     def _qwen_asr_failure_reason(self, reason: str) -> str:
         return f"{reason}; using faster-whisper fallback."
+
+    def _qwen_future_fallback_reason(self, reason: str) -> str:
+        return f"{reason}; keeping the completed result, then using faster-whisper for later chunks."
 
     def _stop_for_qwen_asr_failure(self, reason: str) -> None:
         message = f"{reason} Stopping worker."
@@ -1760,6 +1813,9 @@ class LocalSpeechEngine:
 
     def _uses_qwen_asr(self) -> bool:
         return self.config.asr_engine == "qwen3_asr_diarization"
+
+    def _qwen_aligner_enabled(self) -> bool:
+        return self.config.speech_separation_model == "none" and qwen_forced_aligner_enabled()
 
     def _uses_whisperlivekit_asr(self) -> bool:
         return self.config.asr_engine == "whisperlivekit_sortformer"
@@ -2219,6 +2275,7 @@ class StreamWorker:
         self.transcription_active_generation: int | None = None
         self.transcription_lock = threading.RLock()
         self.transcription_generation = 0
+        self.asr_backpressure_debug_emitted = False
 
     def handle(self, message: dict[str, Any]) -> None:
         message_type = message.get("type")
@@ -2309,7 +2366,28 @@ class StreamWorker:
     def _enqueue_transcription(self, source: str, pcm: bytes, timestamp_ms: int, queue_diarization: bool) -> None:
         with self.transcription_lock:
             generation = self.transcription_generation
+            retained: list[tuple[int, str, bytes, int, bool]] = []
+            replaced_pending = False
+            while True:
+                try:
+                    pending = self.transcription_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if pending[0] == generation and pending[1] == source:
+                    replaced_pending = True
+                    continue
+                retained.append(pending)
+            for pending in retained:
+                self.transcription_queue.put(pending)
             self.transcription_queue.put((generation, source, pcm, timestamp_ms, queue_diarization))
+            if replaced_pending and not self.asr_backpressure_debug_emitted:
+                self.asr_backpressure_debug_emitted = True
+                emit({
+                    "type": "model_status",
+                    "stage": "asr_backpressure",
+                    "message": "ASR is slower than capture. Replaced an older pending chunk from the same source to keep captions near live audio.",
+                    "progress": 0,
+                })
             emit({
                 "type": "model_status",
                 "stage": "asr_queued",
@@ -2334,13 +2412,13 @@ class StreamWorker:
         current_thread = threading.current_thread()
         try:
             while True:
-                try:
-                    generation, source, pcm, timestamp_ms, queue_diarization = self.transcription_queue.get_nowait()
-                except queue.Empty:
-                    with self.transcription_lock:
+                with self.transcription_lock:
+                    try:
+                        generation, source, pcm, timestamp_ms, queue_diarization = self.transcription_queue.get_nowait()
+                    except queue.Empty:
                         if self.transcription_queue.empty():
                             return
-                    continue
+                        continue
 
                 if generation != worker_generation:
                     with self.transcription_lock:
@@ -2437,6 +2515,7 @@ class StreamWorker:
             self.transcription_thread_generation = None
             self.transcription_active = False
             self.transcription_active_generation = None
+            self.asr_backpressure_debug_emitted = False
 
     def _asr_long_running_seconds(self) -> float:
         return asr_long_running_seconds()
@@ -2472,12 +2551,13 @@ def qwen_asr_model_id(model_name: str) -> str:
     return os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_ASR_17B", "Qwen/Qwen3-ASR-1.7B")
 
 
-def load_qwen_asr_model(model_name: str, device: str) -> Any:
+def load_qwen_asr_model(model_name: str, device: str, use_aligner: bool | None = None) -> Any:
     import torch
     from qwen_asr import Qwen3ASRModel
 
     model_path = ensure_qwen_snapshot(qwen_asr_model_id(model_name))
-    use_aligner = qwen_forced_aligner_enabled()
+    if use_aligner is None:
+        use_aligner = qwen_forced_aligner_enabled()
     kwargs: dict[str, Any] = {
         "dtype": torch.bfloat16 if device == "cuda" else torch.float32,
         "device_map": "cuda:0" if device == "cuda" else "cpu",
@@ -2543,9 +2623,11 @@ def qwen_snapshot_validation_error(snapshot_path: Path) -> str | None:
     return None
 
 
-def qwen_model_files_prepared(models_dir: Path, model_name: str) -> bool:
+def qwen_model_files_prepared(models_dir: Path, model_name: str, use_aligner: bool | None = None) -> bool:
     model_ids = [qwen_asr_model_id(model_name)]
-    if qwen_forced_aligner_enabled():
+    if use_aligner is None:
+        use_aligner = qwen_forced_aligner_enabled()
+    if use_aligner:
         model_ids.append(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_FORCED_ALIGNER", "Qwen/Qwen3-ForcedAligner-0.6B"))
     return all(qwen_cached_snapshot_prepared(models_dir, model_id) for model_id in model_ids)
 
@@ -2589,6 +2671,12 @@ def qwen_slow_fallback_seconds() -> float:
         return max(0.01, float(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_SLOW_FALLBACK_SECONDS", "2.5")))
     except ValueError:
         return 2.5
+
+
+def qwen_audio_input(wav_path: Path | list[Path]) -> str | list[str]:
+    if isinstance(wav_path, list):
+        return [str(path) for path in wav_path]
+    return str(wav_path)
 
 
 def qwen_language_name(language_code: str | None) -> str | None:
@@ -4522,7 +4610,7 @@ def pcm_to_waveform(pcm: bytes):
 
 
 class MossFormer2Separator:
-    def __init__(self, models_dir: Path) -> None:
+    def __init__(self, models_dir: Path, device: str) -> None:
         from clearvoice import ClearVoice
 
         self.models_dir = models_dir
@@ -4536,14 +4624,17 @@ class MossFormer2Separator:
             ))
         finally:
             os.chdir(previous_directory)
+        configure_clearvoice_device(self.model, device)
 
     def separate(self, pcm: bytes) -> list[Any]:
         import numpy as np
+        import torch
 
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-        separated = normalize_separated_waveforms(
-            call_without_stdout_noise(lambda: self.model(samples.reshape(1, -1)))
-        )
+        with torch.inference_mode():
+            separated = normalize_separated_waveforms(
+                call_without_stdout_noise(lambda: self.model(samples.reshape(1, -1)))
+            )
         return [stem[:samples.size] for stem in separated]
 
 
@@ -4574,10 +4665,26 @@ def load_speech_separator(model: str, models_dir: Path, device: str) -> Any:
     normalized = normalize_speech_separation_model(model)
     root = models_dir / "speech-separation"
     if normalized == "mossformer2_ss_16k":
-        return MossFormer2Separator(root / "mossformer2")
+        return MossFormer2Separator(root / "mossformer2", device)
     if normalized == "sepformer_whamr16k":
         return SepFormerSeparator(root / "sepformer-whamr16k", device)
     raise ValueError(f"Unsupported speech separation model: {model}")
+
+
+def configure_clearvoice_device(clearvoice_model: Any, device: str) -> None:
+    import torch
+
+    target_device = torch.device(device)
+    for network in getattr(clearvoice_model, "models", []):
+        model = getattr(network, "model", None)
+        if model is None:
+            continue
+        model.to(target_device)
+        model.eval()
+        network.device = target_device
+        args = getattr(network, "args", None)
+        if args is not None:
+            args.use_cuda = 1 if target_device.type == "cuda" else 0
 
 
 def normalize_separated_waveforms(value: Any) -> list[Any]:
@@ -4586,8 +4693,11 @@ def normalize_separated_waveforms(value: Any) -> list[Any]:
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()
     array_value = np.asarray(value, dtype=np.float32)
-    while array_value.ndim > 2 and array_value.shape[0] == 1:
-        array_value = array_value[0]
+    while array_value.ndim > 2:
+        singleton_axis = next((axis for axis, size in enumerate(array_value.shape) if size == 1), None)
+        if singleton_axis is None:
+            break
+        array_value = np.squeeze(array_value, axis=singleton_axis)
     if array_value.ndim != 2:
         raise ValueError(f"Speech separator returned an unsupported shape: {array_value.shape}")
     if array_value.shape[0] == 2:
@@ -4733,7 +4843,15 @@ def check_environment(models_dir: Path) -> int:
     speech_separation_model = normalize_speech_separation_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL"))
     materialize_model_cache_links(models_dir, stt_model)
     qwen_runtime_error = qwen_asr_runtime_error() if asr_engine == "qwen3_asr_diarization" else None
-    qwen_files_ready = qwen_model_files_prepared(models_dir, stt_model) if asr_engine == "qwen3_asr_diarization" else True
+    qwen_files_ready = (
+        qwen_model_files_prepared(
+            models_dir,
+            stt_model,
+            speech_separation_model == "none" and qwen_forced_aligner_enabled(),
+        )
+        if asr_engine == "qwen3_asr_diarization"
+        else True
+    )
     packages = {
         "faster_whisper": has_module("faster_whisper"),
         "pyannote_audio": has_module("pyannote.audio"),

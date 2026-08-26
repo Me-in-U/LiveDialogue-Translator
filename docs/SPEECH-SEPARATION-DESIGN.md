@@ -63,7 +63,9 @@ Windows system audio, 16 kHz mono PCM
   -> keep or swap stems to stabilize channel order
   -> remove the repeated 250 ms prefix
   -> reject weak, highly correlated, or duplicate stems
-  -> transcribe each retained stem with the selected multilingual ASR
+  -> skip Qwen ForcedAligner because separated channels already define speakers
+  -> batch both retained stems into one Qwen inference when Qwen is selected
+  -> otherwise transcribe each retained stem with the selected multilingual ASR
   -> emit stable speaker caption events
   -> existing target-language translation provider
   -> caption page and overlay
@@ -72,6 +74,11 @@ Windows system audio, 16 kHz mono PCM
 The first window contains 1.75 seconds. Later separator inputs contain the new
 1.75 seconds plus the previous 250 ms, producing a two-second model window
 without losing or repeating caption audio.
+
+The worker applies the selected CUDA device to the ClearVoice network instead
+of relying on the package's automatic device choice. If processing falls behind
+capture, the queue keeps only the newest pending window for each audio source.
+This bounds live-caption delay instead of replaying an ever-growing stale queue.
 
 ## Speaker identity and diarization interaction
 
@@ -107,7 +114,7 @@ This is the intended engineering budget for the recommended CUDA path:
 | --- | ---: |
 | Audio accumulation | 1.75 s |
 | Separation and channel stabilization | 0.75 s |
-| Two stem ASR calls | 1.50 s |
+| Two-stem ASR inference | 1.50 s |
 | Translation | 0.75 s |
 | Event and UI rendering | 0.25 s |
 | Total | 5.00 s |

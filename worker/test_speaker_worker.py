@@ -311,6 +311,45 @@ print("ok")
 
         self.assertEqual([("system", len(pcm), 1234, True)], transcribe_calls)
 
+    def test_stream_worker_replaces_stale_pending_chunks_per_source(self) -> None:
+        started = threading.Event()
+        release = threading.Event()
+        transcribe_calls = []
+        worker = speaker_worker.StreamWorker(Path("models"))
+        worker.running = True
+        pcm = tone_pcm(1)
+
+        def transcribe(source, pcm_data, timestamp_ms, queue_diarization=True):
+            transcribe_calls.append((source, len(pcm_data), timestamp_ms, queue_diarization))
+            if timestamp_ms == 1000:
+                started.set()
+                release.wait(1.0)
+
+        worker.engine.transcribe = transcribe
+        output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output):
+                worker._enqueue_transcription("system", pcm, 1000, True)
+                self.assertTrue(started.wait(0.5))
+                worker._enqueue_transcription("mic", pcm, 2000, True)
+                worker._enqueue_transcription("system", pcm, 3000, True)
+                worker._enqueue_transcription("system", pcm, 4000, True)
+                worker._enqueue_transcription("mic", pcm, 5000, True)
+
+            with worker.transcription_lock:
+                queued = list(worker.transcription_queue.queue)
+            self.assertEqual(2, len(queued))
+            self.assertEqual({("system", 4000), ("mic", 5000)}, {(item[1], item[3]) for item in queued})
+        finally:
+            release.set()
+            self.wait_for_transcription(worker)
+
+        events = [json.loads(line) for line in output.getvalue().splitlines()]
+        backpressure_events = [event for event in events if event.get("stage") == "asr_backpressure"]
+        self.assertEqual(1, len(backpressure_events))
+        self.assertNotIn(("mic", len(pcm), 2000, True), transcribe_calls)
+        self.assertNotIn(("system", len(pcm), 3000, True), transcribe_calls)
+
     def test_stream_worker_runs_streaming_diarization_asr_in_background(self) -> None:
         started = threading.Event()
         release = threading.Event()
@@ -1387,6 +1426,35 @@ print("ok")
             else:
                 os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_ATTENTION"] = original_attention
 
+    def test_load_qwen_model_can_skip_forced_aligner_for_separated_audio(self) -> None:
+        calls = []
+
+        class FakeModel:
+            @staticmethod
+            def from_pretrained(model_id, **kwargs):
+                calls.append((model_id, kwargs))
+                return "qwen"
+
+        fake_qwen = types.ModuleType("qwen_asr")
+        fake_qwen.Qwen3ASRModel = FakeModel
+        original_qwen = sys.modules.get("qwen_asr")
+        original_snapshot = speaker_worker.ensure_qwen_snapshot
+        try:
+            sys.modules["qwen_asr"] = fake_qwen
+            speaker_worker.ensure_qwen_snapshot = lambda model_id: Path("models") / model_id.split("/")[-1]
+
+            model = speaker_worker.load_qwen_asr_model("qwen3-asr-0.6b", "cuda", use_aligner=False)
+        finally:
+            speaker_worker.ensure_qwen_snapshot = original_snapshot
+            if original_qwen is None:
+                sys.modules.pop("qwen_asr", None)
+            else:
+                sys.modules["qwen_asr"] = original_qwen
+
+        self.assertEqual("qwen", model)
+        self.assertNotIn("forced_aligner", calls[0][1])
+        self.assertNotIn("forced_aligner_kwargs", calls[0][1])
+
     def test_qwen_forced_aligner_items_convert_to_timed_text_parts(self) -> None:
         class Item:
             def __init__(self, text, start_time, end_time):
@@ -1741,7 +1809,40 @@ print("ok")
         self.assertFalse(thread.is_alive())
         self.assertEqual(["live-dialogue-translator-asr"], qwen_threads)
 
-    def test_qwen_slow_result_disables_qwen_and_uses_faster_whisper_fallback(self) -> None:
+    def test_qwen_asr_worker_keeps_completed_result_after_timeout_notice(self) -> None:
+        class QwenResult:
+            text = "완료된 qwen"
+            time_stamps = []
+
+        class FakeQwen:
+            def transcribe(self, *_args, **_kwargs):
+                time.sleep(0.05)
+                return [QwenResult()]
+
+        original_timeout = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS")
+        os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS"] = "0.01"
+        try:
+            engine = speaker_worker.LocalSpeechEngine(Path("models"))
+            engine.qwen_model = FakeQwen()
+            result_box = {}
+
+            def run() -> None:
+                result_box["results"] = engine._call_qwen_transcribe_in_asr_worker(Path("audio.wav"), "Korean", False)
+
+            thread = threading.Thread(target=run, name="live-dialogue-translator-asr")
+            thread.start()
+            thread.join(1.0)
+        finally:
+            if original_timeout is None:
+                os.environ.pop("LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS", None)
+            else:
+                os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS"] = original_timeout
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual("완료된 qwen", result_box["results"][0].text)
+        self.assertIn("timed out", engine.qwen_disabled_reason or "")
+
+    def test_qwen_slow_result_is_kept_then_later_chunks_use_faster_whisper_fallback(self) -> None:
         transcribe_calls = []
 
         class QwenResult:
@@ -1780,7 +1881,8 @@ print("ok")
                 wav_path = Path(temp.name)
             try:
                 speaker_worker.write_wav(wav_path, tone_pcm(1))
-                parts = engine._transcribe_qwen_wav_parts(wav_path)
+                first_parts = engine._transcribe_qwen_wav_parts(wav_path)
+                second_parts = engine._transcribe_qwen_wav_parts(wav_path)
             finally:
                 wav_path.unlink(missing_ok=True)
         finally:
@@ -1790,8 +1892,37 @@ print("ok")
                 os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_SLOW_FALLBACK_SECONDS"] = original_slow
 
         self.assertEqual([True], [call["return_time_stamps"] for call in transcribe_calls])
-        self.assertEqual("slow fallback", speaker_worker.join_text_parts(parts))
+        self.assertEqual("느린 qwen", speaker_worker.join_text_parts(first_parts))
+        self.assertEqual("slow fallback", speaker_worker.join_text_parts(second_parts))
         self.assertIn("too slow", engine.qwen_disabled_reason or "")
+
+    def test_qwen_separated_audio_does_not_request_timestamp_alignment(self) -> None:
+        transcribe_calls = []
+
+        class QwenResult:
+            text = "분리 자막"
+            time_stamps = []
+
+        class FakeQwen:
+            def transcribe(self, audio, **kwargs):
+                transcribe_calls.append(kwargs)
+                return [QwenResult()]
+
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.asr_engine = "qwen3_asr_diarization"
+        engine.config.speech_separation_model = "mossformer2_ss_16k"
+        engine.qwen_model = FakeQwen()
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
+            wav_path = Path(temp.name)
+        try:
+            speaker_worker.write_wav(wav_path, tone_pcm(1))
+            parts = engine._transcribe_qwen_wav_parts(wav_path)
+        finally:
+            wav_path.unlink(missing_ok=True)
+
+        self.assertEqual([False], [call["return_time_stamps"] for call in transcribe_calls])
+        self.assertEqual("분리 자막", speaker_worker.join_text_parts(parts))
 
     def test_qwen_fallback_retries_with_relaxed_whisper_options_when_empty(self) -> None:
         whisper_calls = []
@@ -3794,26 +3925,86 @@ print("ok")
         self.assertEqual({"speaker_1", "speaker_2"}, {event["speakerId"] for event in final_events})
         self.assertEqual({"hello", "안녕하세요"}, {event["text"] for event in final_events})
 
+    def test_overlap_separation_batches_two_qwen_stems(self) -> None:
+        import numpy as np
+
+        samples = np.arange(speaker_worker.SAMPLE_RATE * 2, dtype=np.float32)
+        first = np.sin(2 * np.pi * 220 * samples / speaker_worker.SAMPLE_RATE).astype(np.float32) * 0.12
+        second = np.sin(2 * np.pi * 440 * samples / speaker_worker.SAMPLE_RATE).astype(np.float32) * 0.08
+        transcribe_calls = []
+
+        class QwenResult:
+            def __init__(self, text):
+                self.text = text
+                self.time_stamps = []
+                self.language = "Korean"
+
+        class FakeQwen:
+            def transcribe(self, audio, **kwargs):
+                transcribe_calls.append((audio, kwargs))
+                return [QwenResult("첫 번째"), QwenResult("두 번째")]
+
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.asr_engine = "qwen3_asr_diarization"
+        engine.config.speech_separation_model = "mossformer2_ss_16k"
+        engine.config.diarization_enabled = False
+        engine.speech_separator = types.SimpleNamespace(separate=lambda _pcm: [first, second])
+        engine.qwen_model = FakeQwen()
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            handled = engine._try_transcribe_separated_speech(
+                "system",
+                tone_pcm(2),
+                1000,
+                time.perf_counter(),
+            )
+
+        events = [json.loads(line) for line in output.getvalue().splitlines()]
+        final_events = [event for event in events if event["type"] == "final_caption"]
+        self.assertTrue(handled)
+        self.assertEqual(1, len(transcribe_calls))
+        self.assertEqual(2, len(transcribe_calls[0][0]))
+        self.assertFalse(transcribe_calls[0][1]["return_time_stamps"])
+        self.assertEqual({"첫 번째", "두 번째"}, {event["text"] for event in final_events})
+
     def test_mossformer_adapter_batches_input_and_trims_model_padding(self) -> None:
         import numpy as np
 
         observed_shapes = []
+        observed_devices = []
+
+        class FakeTorchModel:
+            def to(self, device):
+                observed_devices.append(str(device))
+                return self
+
+            def eval(self):
+                return self
 
         class FakeClearVoice:
             def __init__(self, task, model_names):
                 self.task = task
                 self.model_names = model_names
+                self.models = [types.SimpleNamespace(
+                    model=FakeTorchModel(),
+                    device=None,
+                    args=types.SimpleNamespace(use_cuda=0),
+                )]
 
             def __call__(self, samples):
                 observed_shapes.append(samples.shape)
                 padded = samples.shape[1] + 100
-                return [np.ones(padded, dtype=np.float32), np.full(padded, 0.5, dtype=np.float32)]
+                return np.stack([
+                    np.ones(padded, dtype=np.float32),
+                    np.full(padded, 0.5, dtype=np.float32),
+                ])[:, None, :]
 
         original = sys.modules.get("clearvoice")
         sys.modules["clearvoice"] = types.SimpleNamespace(ClearVoice=FakeClearVoice)
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                separator = speaker_worker.MossFormer2Separator(Path(temp_dir))
+                separator = speaker_worker.MossFormer2Separator(Path(temp_dir), "cuda")
                 stems = separator.separate(tone_pcm(1))
         finally:
             if original is None:
@@ -3822,6 +4013,9 @@ print("ok")
                 sys.modules["clearvoice"] = original
 
         self.assertEqual([(1, speaker_worker.SAMPLE_RATE)], observed_shapes)
+        self.assertEqual(["cuda"], observed_devices)
+        self.assertEqual("cuda", str(separator.model.models[0].device))
+        self.assertEqual(1, separator.model.models[0].args.use_cuda)
         self.assertEqual([speaker_worker.SAMPLE_RATE, speaker_worker.SAMPLE_RATE], [len(stem) for stem in stems])
 
     def test_speech_separation_preparation_checks_model_specific_files(self) -> None:
