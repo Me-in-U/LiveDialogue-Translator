@@ -558,6 +558,49 @@ print("ok")
         samples = speaker_worker.pcm_to_samples(result.pcm)
         self.assertGreater(max(abs(sample) for sample in samples), 2000)
 
+    def test_stt_preprocess_preserves_continuous_voice_for_streaming_diarization(self) -> None:
+        pcm = tone_pcm(5, amplitude=220)
+
+        default_result = speaker_worker.preprocess_stt_pcm(pcm)
+        streaming_result = speaker_worker.preprocess_stt_pcm(pcm, preserve_continuous_voice=True)
+
+        self.assertIsNone(default_result)
+        self.assertIsNotNone(streaming_result)
+        assert streaming_result is not None
+        self.assertEqual(0, streaming_result.leading_trim_ms)
+        self.assertEqual(0, streaming_result.trailing_trim_ms)
+        self.assertEqual(len(pcm), len(streaming_result.pcm))
+
+    def test_streaming_diarization_transcribes_continuous_voice_instead_of_dropping_it(self) -> None:
+        events = []
+        original_emit = speaker_worker.emit
+        speaker_worker.emit = lambda event: events.append(event)
+        try:
+            engine = speaker_worker.LocalSpeechEngine(Path("models"))
+            engine.config.asr_engine = "qwen3_asr_diarization"
+            engine.config.diarization_enabled = True
+            engine.config.diarization_model = "sortformer"
+            engine.ensure_loaded = lambda: None
+            engine._transcribe_wav_parts = lambda _path: [
+                speaker_worker.TimedTextPart("지속 음성 자막", 0, 5000, False)
+            ]
+
+            engine.transcribe("system", tone_pcm(5, amplitude=220), 1000, queue_diarization=False)
+        finally:
+            speaker_worker.emit = original_emit
+
+        captions = [event for event in events if event.get("type") == "final_caption"]
+        self.assertEqual(1, len(captions))
+        self.assertEqual("지속 음성 자막", captions[0]["text"])
+        self.assertFalse(any(event.get("stage") == "asr_audio_skipped" for event in events))
+
+    def test_streaming_diarization_requires_diarization_to_be_enabled(self) -> None:
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.diarization_model = "sortformer"
+        engine.config.diarization_enabled = False
+
+        self.assertFalse(engine._uses_streaming_diarization())
+
     def test_has_whisper_model_bin_treats_untrusted_windows_cache_as_missing(self) -> None:
         original = speaker_worker.whisper_cache_dir
         speaker_worker.whisper_cache_dir = lambda _models_dir, _model_name: BrokenSnapshotCache()
@@ -1954,6 +1997,14 @@ print("ok")
         self.assertEqual("timeout fallback", speaker_worker.join_text_parts(parts))
         self.assertIsNotNone(engine.qwen_disabled_reason)
 
+    def test_qwen_default_timeout_covers_supported_gpu_inference_budget(self) -> None:
+        original_timeout = os.environ.pop("LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS", None)
+        try:
+            self.assertEqual(8.0, speaker_worker.qwen_timeout_seconds())
+        finally:
+            if original_timeout is not None:
+                os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS"] = original_timeout
+
     def test_qwen_asr_worker_calls_model_without_nested_timeout_thread(self) -> None:
         qwen_threads = []
 
@@ -2020,7 +2071,7 @@ print("ok")
         self.assertEqual("완료된 qwen", result_box["results"][0].text)
         self.assertIn("timed out", engine.qwen_disabled_reason or "")
 
-    def test_qwen_slow_result_is_kept_then_later_chunks_use_faster_whisper_fallback(self) -> None:
+    def test_qwen_slow_completed_result_keeps_using_qwen_for_later_chunks(self) -> None:
         transcribe_calls = []
 
         class QwenResult:
@@ -2033,19 +2084,6 @@ print("ok")
                 time.sleep(0.05)
                 return [QwenResult()]
 
-        class Segment:
-            text = "slow fallback"
-            start = 0.0
-            end = 1.0
-            words = None
-
-        class Info:
-            language = "ko"
-
-        class FakeWhisper:
-            def transcribe(self, *_args, **_kwargs):
-                return [Segment()], Info()
-
         original_slow = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_SLOW_FALLBACK_SECONDS")
         os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_SLOW_FALLBACK_SECONDS"] = "0.01"
         try:
@@ -2053,7 +2091,6 @@ print("ok")
             engine.config.asr_engine = "qwen3_asr_diarization"
             engine.config.stt_languages = ["ko"]
             engine.qwen_model = FakeQwen()
-            engine.qwen_fallback_whisper_model = FakeWhisper()
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
                 wav_path = Path(temp.name)
@@ -2069,10 +2106,10 @@ print("ok")
             else:
                 os.environ["LIVE_DIALOGUE_TRANSLATOR_QWEN_SLOW_FALLBACK_SECONDS"] = original_slow
 
-        self.assertEqual([True], [call["return_time_stamps"] for call in transcribe_calls])
+        self.assertEqual([True, True], [call["return_time_stamps"] for call in transcribe_calls])
         self.assertEqual("느린 qwen", speaker_worker.join_text_parts(first_parts))
-        self.assertEqual("slow fallback", speaker_worker.join_text_parts(second_parts))
-        self.assertIn("too slow", engine.qwen_disabled_reason or "")
+        self.assertEqual("느린 qwen", speaker_worker.join_text_parts(second_parts))
+        self.assertIsNone(engine.qwen_disabled_reason)
 
     def test_qwen_separated_audio_does_not_request_timestamp_alignment(self) -> None:
         transcribe_calls = []

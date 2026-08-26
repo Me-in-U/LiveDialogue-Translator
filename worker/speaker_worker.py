@@ -570,6 +570,7 @@ class LocalSpeechEngine:
         self.qwen_timeout_debug_emitted = False
         self.qwen_slow_debug_emitted = False
         self.qwen_running_debug_emitted = False
+        self.stt_audio_skipped_debug_emitted = False
         self.qwen_disabled_reason: str | None = None
         self.last_qwen_call_seconds = 0.0
         self.streaming_diarization_busy = False
@@ -652,6 +653,7 @@ class LocalSpeechEngine:
             self.qwen_timeout_debug_emitted = False
             self.qwen_slow_debug_emitted = False
             self.qwen_running_debug_emitted = False
+            self.stt_audio_skipped_debug_emitted = False
             self.qwen_disabled_reason = None
             self.last_qwen_call_seconds = 0.0
         if diarization_changed:
@@ -979,8 +981,19 @@ class LocalSpeechEngine:
             if not stable_turns_first and self._try_transcribe_diarized_turns(source, pcm, timestamp_ms, started):
                 return
 
-        stt_audio = preprocess_stt_pcm(pcm)
+        stt_audio = preprocess_stt_pcm(
+            pcm,
+            preserve_continuous_voice=self._uses_streaming_diarization(),
+        )
         if stt_audio is None:
+            if not self.stt_audio_skipped_debug_emitted:
+                self.stt_audio_skipped_debug_emitted = True
+                emit({
+                    "type": "model_status",
+                    "stage": "asr_audio_skipped",
+                    "message": f"ASR input contained no retained speech after preprocessing source={source}, rms={samples_rms(pcm_to_samples(pcm)):.1f}",
+                    "progress": 0,
+                })
             return
 
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
@@ -1484,19 +1497,14 @@ class LocalSpeechEngine:
         slow_seconds = qwen_slow_fallback_seconds()
         if self.last_qwen_call_seconds < slow_seconds:
             return
-        self.qwen_disabled_reason = self._qwen_future_fallback_reason(
-            f"Qwen-ASR too slow ({self.last_qwen_call_seconds:.1f}s >= {slow_seconds:g}s)"
-        )
         if not self.qwen_slow_debug_emitted:
             self.qwen_slow_debug_emitted = True
             emit({
                 "type": "model_status",
                 "stage": "qwen_slow",
-                "message": self.qwen_disabled_reason,
+                "message": f"Qwen-ASR completed in {self.last_qwen_call_seconds:.1f}s; continuing with Qwen because the result is valid.",
                 "progress": 0,
             })
-        if not self._qwen_fallback_allowed():
-            self._stop_for_qwen_asr_failure(self.qwen_disabled_reason)
 
     def _call_qwen_transcribe_with_timeout(self, wav_path: Path | list[Path], language: str | None, return_time_stamps: bool) -> Any | None:
         if threading.current_thread().name == ASR_THREAD_NAME:
@@ -1841,7 +1849,11 @@ class LocalSpeechEngine:
         return self._fallback_speaker_id(source) if allow_fallback else None
 
     def _uses_streaming_diarization(self) -> bool:
-        return self.config.speech_separation_model == "none" and self.config.diarization_model in {"diart", "sortformer"}
+        return (
+            self.config.diarization_enabled
+            and self.config.speech_separation_model == "none"
+            and self.config.diarization_model in {"diart", "sortformer"}
+        )
 
     def _uses_qwen_asr(self) -> bool:
         return self.config.asr_engine == "qwen3_asr_diarization"
@@ -2686,9 +2698,9 @@ def qwen_forced_aligner_enabled() -> bool:
 
 def qwen_timeout_seconds() -> float:
     try:
-        return max(0.01, float(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS", "4.0")))
+        return max(0.01, float(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_TIMEOUT_SECONDS", "8.0")))
     except ValueError:
-        return 4.0
+        return 8.0
 
 
 def asr_long_running_seconds() -> float:
@@ -3898,13 +3910,13 @@ def slice_pcm_seconds(pcm: bytes, start_seconds: float, end_seconds: float) -> b
     return pcm[start:end]
 
 
-def preprocess_stt_pcm(pcm: bytes) -> SttPreprocessResult | None:
+def preprocess_stt_pcm(pcm: bytes, preserve_continuous_voice: bool = False) -> SttPreprocessResult | None:
     samples = pcm_to_samples(pcm)
     if not samples:
         return None
 
     samples = remove_dc_offset(samples)
-    start_sample, end_sample = speech_bounds_with_padding(samples)
+    start_sample, end_sample = speech_bounds_with_padding(samples, preserve_continuous_voice)
     if end_sample <= start_sample:
         return None
 
@@ -3953,7 +3965,7 @@ def remove_dc_offset(samples: list[int]) -> list[int]:
     return [clip_int16(round(sample - offset)) for sample in samples]
 
 
-def speech_bounds_with_padding(samples: list[int]) -> tuple[int, int]:
+def speech_bounds_with_padding(samples: list[int], preserve_continuous_voice: bool = False) -> tuple[int, int]:
     frame_size = max(1, SAMPLE_RATE * STT_TRIM_FRAME_MS // 1000)
     frame_rms = [
         samples_rms(samples[index:index + frame_size])
@@ -3967,6 +3979,12 @@ def speech_bounds_with_padding(samples: list[int]) -> tuple[int, int]:
     noise_floor = sorted_rms[noise_index]
     threshold = max(VOICE_RMS_THRESHOLD, min(450.0, noise_floor * 2.0))
     active = [index for index, value in enumerate(frame_rms) if value >= threshold]
+    if preserve_continuous_voice:
+        absolute_active = [index for index, value in enumerate(frame_rms) if value >= VOICE_RMS_THRESHOLD]
+        absolute_coverage = len(absolute_active) / len(frame_rms)
+        adaptive_coverage = len(active) / len(frame_rms)
+        if absolute_coverage >= 0.5 and adaptive_coverage < 0.15:
+            return 0, len(samples)
     if not active:
         return 0, 0
 
