@@ -5,9 +5,9 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:vm="clr-namespace:LiveDialogueTranslator.App.ViewModels"
         Title="LiveDialogue Translator"
-        Width="920"
+        Width="1180"
         Height="320"
-        MinWidth="860"
+        MinWidth="1080"
         MinHeight="300"
         Background="{StaticResource WindowBrush}"
         ResizeMode="CanResizeWithGrip"
@@ -425,6 +425,7 @@
                             <ColumnDefinition Width="1*" />
                             <ColumnDefinition Width="1*" />
                             <ColumnDefinition Width="1*" />
+                            <ColumnDefinition Width="1*" />
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" Margin="0,0,7,0">
@@ -584,7 +585,7 @@
                             </Border>
                         </StackPanel>
 
-                        <Border Grid.Column="2" Style="{StaticResource SettingsGroupBorderStyle}">
+                        <Border Grid.Column="2" Margin="0,0,7,0" Style="{StaticResource SettingsGroupBorderStyle}">
                             <StackPanel>
                                 <TextBlock x:Name="SettingsSpeakerProcessingGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Speaker Processing" />
                                 <TextBlock x:Name="SettingsSpeakerDescriptionText" Style="{StaticResource SettingsHintStyle}" />
@@ -592,84 +593,109 @@
                                     <TextBlock x:Name="SpeakerProcessingStatusText" FontSize="10.5" TextWrapping="Wrap" />
                                 </Border>
 
-                                <TextBlock x:Name="SpeechSeparationSectionTitle" Style="{StaticResource SettingsSectionTitleStyle}" Margin="2,0,0,4" Text="Overlapping Voice Separation" />
-                                <TextBlock x:Name="SpeechSeparationDescriptionText" Style="{StaticResource SettingsHintStyle}" />
-                                <TextBlock x:Name="SpeechSeparationLabel" Margin="2,0,0,3" Text="Separation Model" />
-                                <ComboBox x:Name="SpeechSeparationModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
-                                    <ComboBoxItem Content="Auto recommendation" Tag="Auto" />
-                                    <ComboBoxItem Content="Off" Tag="None" />
+                                <TextBlock x:Name="SpeakerProcessingModelLabel" Margin="2,0,0,3" Text="Speaker processing model" />
+                                <ComboBox x:Name="SpeakerProcessingModelBox" Height="30" SelectionChanged="RestartSetting_SelectionChanged">
+                                    <ComboBoxItem Content="Auto" Tag="Auto" />
+                                    <ComboBoxItem Content="Off" Tag="Off" />
                                 </ComboBox>
-                                <TextBlock x:Name="SpeechSeparationEffectiveText" Margin="2,4,0,0" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" />
+                                <Border Margin="0,6,0,0" Padding="8,6" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="4" Background="#192D9BF0">
+                                    <TextBlock x:Name="SpeakerProcessingEffectiveText" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+                                </Border>
                                 <TextBlock x:Name="HardwareSummaryText" Margin="2,3,0,0" Style="{StaticResource SettingsHintStyle}" Text="Detecting CPU and GPU..." />
                                 <TextBlock x:Name="SpeechSeparationRecommendationText" Margin="2,0,0,0" Style="{StaticResource SettingsHintStyle}" />
                                 <Button x:Name="RedetectHardwareButton" Height="24" Margin="0,2,0,0" Click="RedetectHardwareButton_Click">Detect again</Button>
 
                                 <Separator Margin="0,9,0,1" Background="{StaticResource BorderBrushSoft}" />
-                                <TextBlock x:Name="SpeakerIdentificationSectionTitle" Style="{StaticResource SettingsSectionTitleStyle}" Text="General Speaker Identification" />
-                                <TextBlock x:Name="SpeakerIdentificationDescriptionText" Style="{StaticResource SettingsHintStyle}" />
-                                <TextBlock x:Name="DiarizationInactiveNoticeText" Margin="2,0,0,5" Foreground="{StaticResource AccentBrush}" FontSize="10.5" FontWeight="SemiBold" TextWrapping="Wrap" Visibility="Collapsed" />
-                                <StackPanel x:Name="DiarizationSettingsPanel">
-                                    <CheckBox x:Name="DiarizationCheck" Height="26" Content="On" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
-                                    <StackPanel x:Name="DiarizationConfigurationPanel">
-                                        <TextBlock x:Name="DiarizationModelLabel" Margin="2,5,0,3" Text="Diarization Model" />
-                                        <UniformGrid x:Name="DiarizationModelPanel" Columns="2" Margin="0,1,0,0">
-                                            <RadioButton x:Name="DiarizationCommunityRadio" GroupName="DiarizationModel" Height="26" Content="Community-1" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="DiarizationDiartRadio" GroupName="DiarizationModel" Height="26" Content="Diart" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="DiarizationSortformerRadio" GroupName="DiarizationModel" Height="26" Content="Sortformer" Checked="RestartSetting_CheckedChanged" />
-                                        </UniformGrid>
-                                        <TextBlock x:Name="DiarizationPresetLabel" Margin="2,7,0,3" Text="Diarization Preset" />
-                                        <UniformGrid Columns="3" Margin="0,1,0,0">
-                                            <RadioButton x:Name="DiarizationPresetSensitiveRadio" GroupName="DiarizationPreset" Height="26" Content="Sensitive" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="DiarizationPresetBalancedRadio" GroupName="DiarizationPreset" Height="26" Content="Balanced" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="DiarizationPresetStableRadio" GroupName="DiarizationPreset" Height="26" Content="Stable" Checked="RestartSetting_CheckedChanged" />
-                                        </UniformGrid>
-                                        <CheckBox x:Name="DiartManualCheck" Height="24" Margin="0,7,0,0" Content="Manual Diart tuning" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
-                                        <TextBlock x:Name="DiartManualDescriptionText" Margin="2,2,0,3" Style="{StaticResource SettingsHintStyle}" />
-                                        <Grid x:Name="DiartManualPanel">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="8" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                            </Grid.RowDefinitions>
-                                            <TextBlock x:Name="DiartDurationLabel" Grid.Row="0" Grid.Column="0" Margin="2,4,0,2" Text="Duration" />
-                                            <TextBox x:Name="DiartDurationBox" Grid.Row="1" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                            <TextBlock x:Name="DiartStepLabel" Grid.Row="0" Grid.Column="2" Margin="2,4,0,2" Text="Step" />
-                                            <TextBox x:Name="DiartStepBox" Grid.Row="1" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                            <TextBlock x:Name="DiartLatencyLabel" Grid.Row="2" Grid.Column="0" Margin="2,6,0,2" Text="Latency" />
-                                            <TextBox x:Name="DiartLatencyBox" Grid.Row="3" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                            <TextBlock x:Name="DiartTauLabel" Grid.Row="2" Grid.Column="2" Margin="2,6,0,2" Text="Tau" />
-                                            <TextBox x:Name="DiartTauBox" Grid.Row="3" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                            <TextBlock x:Name="DiartRhoLabel" Grid.Row="4" Grid.Column="0" Margin="2,6,0,2" Text="Rho" />
-                                            <TextBox x:Name="DiartRhoBox" Grid.Row="5" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                            <TextBlock x:Name="DiartDeltaLabel" Grid.Row="4" Grid.Column="2" Margin="2,6,0,2" Text="Delta" />
-                                            <TextBox x:Name="DiartDeltaBox" Grid.Row="5" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
-                                        </Grid>
-                                        <TextBlock x:Name="SpeakersLabel" Margin="2,7,0,3" Text="Speakers" />
-                                        <UniformGrid x:Name="SpeakerCountPanel" Columns="4" Margin="0,1,0,0">
-                                            <RadioButton x:Name="MaxSpeakers1Radio" Content="1" GroupName="SpeakerCount" Tag="auto:1" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers2Radio" Content="2" GroupName="SpeakerCount" Tag="auto:2" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers3Radio" Content="3" GroupName="SpeakerCount" Tag="auto:3" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers4Radio" Content="4" GroupName="SpeakerCount" Tag="auto:4" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers5Radio" Content="5" GroupName="SpeakerCount" Tag="auto:5" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers6Radio" Content="6" GroupName="SpeakerCount" Tag="auto:6" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers7Radio" Content="7" GroupName="SpeakerCount" Tag="auto:7" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="MaxSpeakers8Radio" Content="8" GroupName="SpeakerCount" Tag="auto:8" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                        </UniformGrid>
-                                        <TextBlock x:Name="SpeakerModeLabel" Margin="2,6,0,2" Text="Speaker Mode" />
-                                        <UniformGrid x:Name="SpeakerCountModePanel" Columns="2" Margin="0,1,0,0">
-                                            <RadioButton x:Name="SpeakerModeActiveMaxRadio" Content="Max active" GroupName="SpeakerCountMode" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                            <RadioButton x:Name="SpeakerModeExactRadio" Content="Exact" GroupName="SpeakerCountMode" Height="23" Checked="RestartSetting_CheckedChanged" />
-                                        </UniformGrid>
-                                    </StackPanel>
+                                <StackPanel x:Name="SpeakerProcessingOptionsPanel">
+                                    <TextBlock x:Name="DiarizationPresetLabel" Margin="2,2,0,3" Text="Speaker preset" />
+                                    <UniformGrid x:Name="DiarizationPresetPanel" Columns="3" Margin="0,1,0,0">
+                                        <RadioButton x:Name="DiarizationPresetSensitiveRadio" GroupName="DiarizationPreset" Height="26" Content="Sensitive" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="DiarizationPresetBalancedRadio" GroupName="DiarizationPreset" Height="26" Content="Balanced" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="DiarizationPresetStableRadio" GroupName="DiarizationPreset" Height="26" Content="Stable" Checked="RestartSetting_CheckedChanged" />
+                                    </UniformGrid>
+                                    <CheckBox x:Name="DiartManualCheck" Height="24" Margin="0,7,0,0" Content="Manual Diart tuning" Checked="RestartSetting_CheckedChanged" Unchecked="RestartSetting_CheckedChanged" />
+                                    <TextBlock x:Name="DiartManualDescriptionText" Margin="2,2,0,3" Style="{StaticResource SettingsHintStyle}" />
+                                    <Grid x:Name="DiartManualPanel">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <TextBlock x:Name="DiartDurationLabel" Grid.Row="0" Grid.Column="0" Margin="2,4,0,2" Text="Duration" />
+                                        <TextBox x:Name="DiartDurationBox" Grid.Row="1" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                        <TextBlock x:Name="DiartStepLabel" Grid.Row="0" Grid.Column="2" Margin="2,4,0,2" Text="Step" />
+                                        <TextBox x:Name="DiartStepBox" Grid.Row="1" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                        <TextBlock x:Name="DiartLatencyLabel" Grid.Row="2" Grid.Column="0" Margin="2,6,0,2" Text="Latency" />
+                                        <TextBox x:Name="DiartLatencyBox" Grid.Row="3" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                        <TextBlock x:Name="DiartTauLabel" Grid.Row="2" Grid.Column="2" Margin="2,6,0,2" Text="Tau" />
+                                        <TextBox x:Name="DiartTauBox" Grid.Row="3" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                        <TextBlock x:Name="DiartRhoLabel" Grid.Row="4" Grid.Column="0" Margin="2,6,0,2" Text="Rho" />
+                                        <TextBox x:Name="DiartRhoBox" Grid.Row="5" Grid.Column="0" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                        <TextBlock x:Name="DiartDeltaLabel" Grid.Row="4" Grid.Column="2" Margin="2,6,0,2" Text="Delta" />
+                                        <TextBox x:Name="DiartDeltaBox" Grid.Row="5" Grid.Column="2" Height="28" TextChanged="RestartSetting_TextChanged" />
+                                    </Grid>
+                                    <TextBlock x:Name="SpeakersLabel" Margin="2,7,0,3" Text="Speakers" />
+                                    <UniformGrid x:Name="SpeakerCountPanel" Columns="4" Margin="0,1,0,0">
+                                        <RadioButton x:Name="MaxSpeakers1Radio" Content="1" GroupName="SpeakerCount" Tag="auto:1" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers2Radio" Content="2" GroupName="SpeakerCount" Tag="auto:2" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers3Radio" Content="3" GroupName="SpeakerCount" Tag="auto:3" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers4Radio" Content="4" GroupName="SpeakerCount" Tag="auto:4" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers5Radio" Content="5" GroupName="SpeakerCount" Tag="auto:5" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers6Radio" Content="6" GroupName="SpeakerCount" Tag="auto:6" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers7Radio" Content="7" GroupName="SpeakerCount" Tag="auto:7" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="MaxSpeakers8Radio" Content="8" GroupName="SpeakerCount" Tag="auto:8" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                    </UniformGrid>
+                                    <TextBlock x:Name="SpeakerModeLabel" Margin="2,6,0,2" Text="Speaker Mode" />
+                                    <UniformGrid x:Name="SpeakerCountModePanel" Columns="2" Margin="0,1,0,0">
+                                        <RadioButton x:Name="SpeakerModeActiveMaxRadio" Content="Max active" GroupName="SpeakerCountMode" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                        <RadioButton x:Name="SpeakerModeExactRadio" Content="Exact" GroupName="SpeakerCountMode" Height="23" Checked="RestartSetting_CheckedChanged" />
+                                    </UniformGrid>
                                 </StackPanel>
+
+                                <StackPanel Visibility="Collapsed">
+                                    <ComboBox x:Name="SpeechSeparationModelBox" />
+                                    <CheckBox x:Name="DiarizationCheck" />
+                                    <UniformGrid x:Name="DiarizationModelPanel">
+                                        <RadioButton x:Name="DiarizationCommunityRadio" GroupName="DiarizationModelState" />
+                                        <RadioButton x:Name="DiarizationDiartRadio" GroupName="DiarizationModelState" />
+                                        <RadioButton x:Name="DiarizationSortformerRadio" GroupName="DiarizationModelState" />
+                                    </UniformGrid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="3" Style="{StaticResource SettingsGroupBorderStyle}">
+                            <StackPanel>
+                                <TextBlock x:Name="ModelDetailsGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Selected Model" />
+                                <TextBlock x:Name="ModelDetailsDescriptionText" Style="{StaticResource SettingsHintStyle}" />
+
+                                <Border Padding="9,8" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="4" Background="#192D9BF0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="SelectedAsrModelTitleText" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="SelectedAsrModelDescriptionText" Margin="0,5,0,0" FontSize="10.5" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Margin="0,8,0,0" Padding="9,8" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="4" Background="#192D9BF0">
+                                    <StackPanel>
+                                        <TextBlock x:Name="SelectedSpeakerModelTitleText" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="SelectedSpeakerModelDescriptionText" Margin="0,5,0,0" FontSize="10.5" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock x:Name="AutomaticSettingsTitleText" Margin="2,12,0,4" Style="{StaticResource SettingsSectionTitleStyle}" Text="Applied settings" />
+                                <Border Style="{StaticResource SettingsStateBorderStyle}">
+                                    <TextBlock x:Name="CurrentSpeakerSettingsText" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                </Border>
+                                <TextBlock x:Name="ModelCompatibilityText" Margin="2,4,0,0" Style="{StaticResource SettingsHintStyle}" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </Grid>

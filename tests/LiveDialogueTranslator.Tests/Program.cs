@@ -80,12 +80,12 @@ var tests = new (string Name, Action Body)[]
     ("main window separates asr engine and model choices", MainWindowSeparatesAsrEngineAndModelChoices),
     ("main window exposes speaker count radios", MainWindowExposesSpeakerCountRadios),
     ("main window exposes speaker count mode options", MainWindowExposesSpeakerCountModeOptions),
-    ("main window deselects diarization for one speaker", MainWindowDeselectsDiarizationForOneSpeaker),
+    ("main window normalizes speaker processing to supported counts", MainWindowDeselectsDiarizationForOneSpeaker),
     ("main window separates asr and diarization presets", MainWindowSeparatesAsrAndDiarizationPresets),
     ("main window exposes stt scenario preset radios", MainWindowExposesSttScenarioPresetRadios),
     ("main window exposes speaker range count options", MainWindowExposesSpeakerRangeCountOptions),
-    ("main window exposes diarization model options", MainWindowExposesDiarizationModelOptions),
-    ("main window allows asr and diarization combinations", MainWindowAllowsAsrAndDiarizationCombinations),
+    ("main window exposes unified speaker processing models", MainWindowExposesDiarizationModelOptions),
+    ("main window applies model aware speaker options", MainWindowAllowsAsrAndDiarizationCombinations),
     ("main window exposes manual diart tuning controls", MainWindowExposesManualDiartTuningControls),
     ("model manager exposes separate hf model term buttons", ModelManagerExposesSeparateHfModelTermButtons),
     ("main window applies settings changes immediately", MainWindowAppliesSettingsChangesImmediately),
@@ -132,7 +132,7 @@ var tests = new (string Name, Action Body)[]
     ("speech separation advisor rejects unsupported runtime paths", SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths),
     ("startup planner installs and prepares selected separation model", StartupPlannerInstallsAndPreparesSpeechSeparation),
     ("main window exposes automatic hardware based separation selection", MainWindowExposesAutomaticHardwareBasedSpeechSeparation),
-    ("settings page separates recognition from speaker processing", SettingsPageSeparatesRecognitionFromSpeakerProcessing),
+    ("settings page shows unified speaker processing and model details", SettingsPageSeparatesRecognitionFromSpeakerProcessing),
     ("speech separation requirements only expose integrated models", SpeechSeparationRequirementsOnlyExposeIntegratedModels),
 };
 
@@ -1408,7 +1408,10 @@ static void MainWindowDeselectsDiarizationForOneSpeaker()
     Assert.Contains("NormalizeDiarizationForSpeakerCount();", source);
     Assert.Contains("private void NormalizeDiarizationForSpeakerCount()", source);
     Assert.Contains("SelectedSpeakerCountMax() == 1", source);
-    Assert.Contains("DiarizationCheck.IsChecked = false;", source);
+    Assert.Contains("MaxSpeakers2Radio.IsChecked = true;", source);
+    Assert.Contains("private void ApplySpeakerProcessingConstraints(bool separationActive, bool identificationActive)", source);
+    Assert.Contains("MaxSpeakers1Radio.IsEnabled = false;", source);
+    Assert.Contains("SpeakerModeExactRadio.IsChecked = true;", source);
     Assert.Contains("private int SelectedSpeakerCountMax()", source);
     Assert.True(
         source.IndexOf("NormalizeDiarizationForSpeakerCount();", StringComparison.Ordinal) <
@@ -1503,12 +1506,15 @@ static void MainWindowExposesDiarizationModelOptions()
     var protocol = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.Core", "Protocol", "WorkerProtocol.cs"));
     var environment = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "WorkerEnvironmentService.cs"));
 
-    Assert.Contains("x:Name=\"DiarizationCommunityRadio\"", xaml);
-    Assert.Contains("x:Name=\"DiarizationDiartRadio\"", xaml);
-    Assert.Contains("x:Name=\"DiarizationSortformerRadio\"", xaml);
+    Assert.Contains("x:Name=\"SpeakerProcessingModelBox\"", xaml);
+    Assert.Contains("PopulateSpeakerProcessingModelItems", source);
+    Assert.Contains("\"MossFormer2\"", source);
+    Assert.Contains("\"SepFormerWhamr16k\"", source);
+    Assert.Contains("\"PyannoteCommunity\"", source);
+    Assert.Contains("\"Diart\"", source);
+    Assert.Contains("\"Sortformer\"", source);
+    Assert.Contains("ApplySpeakerProcessingChoiceToState();", source);
     Assert.True(!xaml.Contains("x:Name=\"DiarizationNemoSortformerRadio\"", StringComparison.Ordinal), "NeMo diarization must not be exposed.");
-    Assert.Contains("GroupName=\"DiarizationModel\"", xaml);
-    Assert.True(!xaml.Contains("x:Name=\"DiarizationModelBox\"", StringComparison.Ordinal), "diarization model selection must be a visible radio group, not a dropdown.");
     Assert.Contains("settings.DiarizationModel = SelectedDiarizationModel();", source);
     Assert.Contains("SelectDiarizationModel(settings.DiarizationModel);", source);
     Assert.Contains("private DiarizationModel SelectedDiarizationModel()", source);
@@ -1531,9 +1537,13 @@ static void MainWindowAllowsAsrAndDiarizationCombinations()
     Assert.Contains("x:Name=\"SttQwen06BItem\"", xaml);
     Assert.Contains("x:Name=\"SttQwen17BItem\"", xaml);
     Assert.Contains("x:Name=\"SttLargeV3TurboItem\"", xaml);
-    Assert.Contains("x:Name=\"DiarizationModelPanel\"", xaml);
+    Assert.Contains("x:Name=\"SpeakerProcessingOptionsPanel\"", xaml);
+    Assert.Contains("x:Name=\"DiarizationPresetPanel\"", xaml);
     Assert.Contains("ApplyAsrEngineUiState(normalizeSelection: true);", source);
-    Assert.Contains("DiarizationModelPanel.Visibility = Visibility.Visible;", source);
+    Assert.Contains("DiarizationPresetPanel.IsEnabled = presetAvailable;", source);
+    Assert.Contains("SpeakerCountPanel.IsEnabled = identificationActive;", source);
+    Assert.Contains("SpeakerCountModePanel.IsEnabled = identificationActive;", source);
+    Assert.Contains("ToolTipService.SetShowOnDisabled(item, true);", source);
     Assert.True(!source.Contains("DiarizationCheck.IsEnabled = !isWhisperLiveKit;", StringComparison.Ordinal), "ASR engine must not lock the diarization toggle.");
     Assert.True(!source.Contains("DiarizationModelPanel.Visibility = isWhisperLiveKit ? Visibility.Collapsed : Visibility.Visible;", StringComparison.Ordinal), "WhisperLiveKit must not hide diarization model choices.");
     Assert.Contains("Sortformer", localizerSource);
@@ -2412,15 +2422,15 @@ static void MainWindowExposesAutomaticHardwareBasedSpeechSeparation()
     var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
     var detector = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "HardwareDetectionService.cs"));
 
-    Assert.Contains("x:Name=\"SpeechSeparationModelBox\"", xaml);
-    Assert.Contains("x:Name=\"SpeechSeparationEffectiveText\"", xaml);
+    Assert.Contains("x:Name=\"SpeakerProcessingModelBox\"", xaml);
+    Assert.Contains("x:Name=\"SpeakerProcessingEffectiveText\"", xaml);
     Assert.Contains("x:Name=\"HardwareSummaryText\"", xaml);
     Assert.Contains("x:Name=\"RedetectHardwareButton\"", xaml);
     Assert.Contains("await hardwareDetection.DetectAsync()", source);
     Assert.Contains("SpeechSeparationAdvisor.Recommend", source);
     Assert.Contains("SpeechSeparationAdvisor.Catalog", source);
     Assert.Contains("SpeechSeparationAdvisor.Assess", source);
-    Assert.Contains("SpeechSeparationAutoWithModel", source);
+    Assert.Contains("SpeakerProcessingAutoWithModel", source);
     Assert.Contains("IsEnabled = isEnabled", source);
     Assert.Contains("ToolTipService.SetShowOnDisabled", source);
     Assert.Contains("sender == SttModelBox", source);
@@ -2435,23 +2445,29 @@ static void SettingsPageSeparatesRecognitionFromSpeakerProcessing()
     var localizer = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
 
     var asrGroup = xaml.IndexOf("x:Name=\"SettingsAsrGroupTitle\"", StringComparison.Ordinal);
-    var separationModel = xaml.IndexOf("x:Name=\"SpeechSeparationModelBox\"", StringComparison.Ordinal);
+    var processingModel = xaml.IndexOf("x:Name=\"SpeakerProcessingModelBox\"", StringComparison.Ordinal);
     var speakerGroup = xaml.IndexOf("x:Name=\"SettingsSpeakerProcessingGroupTitle\"", StringComparison.Ordinal);
-    Assert.True(asrGroup >= 0 && speakerGroup > asrGroup && separationModel > speakerGroup,
-        "Overlapping voice separation must live in Speaker Processing rather than Speech Recognition.");
+    var modelDetails = xaml.IndexOf("x:Name=\"ModelDetailsGroupTitle\"", StringComparison.Ordinal);
+    Assert.True(asrGroup >= 0 && speakerGroup > asrGroup && processingModel > speakerGroup && modelDetails > processingModel,
+        "Speaker processing and selected model details must follow speech recognition.");
+    Assert.Contains("<Border Grid.Column=\"3\"", xaml);
     Assert.Contains("x:Name=\"SpeakerProcessingStatusText\"", xaml);
-    Assert.Contains("x:Name=\"DiarizationSettingsPanel\"", xaml);
-    Assert.Contains("x:Name=\"DiarizationConfigurationPanel\"", xaml);
-    Assert.Contains("x:Name=\"DiarizationInactiveNoticeText\"", xaml);
-    Assert.Contains("DiarizationSettingsPanel.IsEnabled = !separationActive;", source);
-    Assert.Contains("DiarizationConfigurationPanel.IsEnabled = !separationActive && identificationEnabled;", source);
+    Assert.Contains("x:Name=\"SpeakerProcessingEffectiveText\"", xaml);
+    Assert.Contains("x:Name=\"SelectedAsrModelDescriptionText\"", xaml);
+    Assert.Contains("x:Name=\"SelectedSpeakerModelDescriptionText\"", xaml);
+    Assert.Contains("x:Name=\"CurrentSpeakerSettingsText\"", xaml);
+    Assert.Contains("x:Name=\"ModelCompatibilityText\"", xaml);
+    Assert.True(!xaml.Contains("x:Name=\"DiarizationSettingsPanel\"", StringComparison.Ordinal), "The old split diarization settings panel must not be visible.");
+    Assert.True(!xaml.Contains("x:Name=\"DiarizationInactiveNoticeText\"", StringComparison.Ordinal), "The old split inactive notice must be removed.");
+    Assert.Contains("UpdateModelDetailsPanel", source);
     Assert.Contains("SpeakerProcessingStatusSeparation", source);
     Assert.Contains("SpeakerProcessingStatusIdentification", source);
     Assert.Contains("SelectedEffectiveSpeechSeparationModel()", source);
     Assert.Contains("[\"SettingsSpeakerProcessingGroup\"]", localizer);
-    Assert.Contains("[\"SpeakerIdentificationDescription\"]", localizer);
-    Assert.Contains("[\"SpeechSeparationDescription\"]", localizer);
-    Assert.Contains("[\"DiarizationModel\"] = (\"Identification Model\", \"화자 식별 모델\")", localizer);
+    Assert.Contains("[\"ModelDetailsGroup\"]", localizer);
+    Assert.Contains("[\"SpeakerModelMossDescription\"]", localizer);
+    Assert.Contains("[\"SpeakerModelCommunityDescription\"]", localizer);
+    Assert.Contains("[\"SpeakerSettingsSeparated\"]", localizer);
 }
 
 static void SpeechSeparationRequirementsOnlyExposeIntegratedModels()

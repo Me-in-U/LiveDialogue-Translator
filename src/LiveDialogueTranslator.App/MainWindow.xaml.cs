@@ -215,9 +215,7 @@ public partial class MainWindow : Window
         SttPresetTalkShowRadio.Content = L("Stable");
         ComputeLabel.Text = L("Compute");
         ComputeAutoItem.Content = L("Auto");
-        SpeechSeparationSectionTitle.Text = L("SpeechSeparationSection");
-        SpeechSeparationDescriptionText.Text = L("SpeechSeparationDescription");
-        SpeechSeparationLabel.Text = L("SpeechSeparationModel");
+        SpeakerProcessingModelLabel.Text = L("SpeakerProcessingModel");
         RedetectHardwareButton.Content = L("DetectHardwareAgain");
         HardwareSummaryText.Text = L("DetectingHardware");
         ModelManagerLabel.Text = L("ModelManager");
@@ -240,14 +238,6 @@ public partial class MainWindow : Window
         SpeakerModeExactRadio.ToolTip = L("SpeakerModeHelp");
         CaptionDisplayLinesLabel.Text = L("CaptionDisplayLines");
         OverlayDisplayLinesLabel.Text = L("OverlayDisplayLines");
-        SpeakerIdentificationSectionTitle.Text = L("SpeakerIdentificationSection");
-        SpeakerIdentificationDescriptionText.Text = L("SpeakerIdentificationDescription");
-        DiarizationInactiveNoticeText.Text = L("SpeakerIdentificationPaused");
-        DiarizationCheck.Content = L("SpeakerIdentificationEnabled");
-        DiarizationModelLabel.Text = L("DiarizationModel");
-        DiarizationCommunityRadio.Content = L("PyannoteCommunity");
-        DiarizationDiartRadio.Content = L("DiartRealtime");
-        DiarizationSortformerRadio.Content = L("Sortformer");
         DiarizationPresetLabel.Text = L("DiarizationPreset");
         DiarizationPresetSensitiveRadio.Content = L("Sensitive");
         DiarizationPresetBalancedRadio.Content = L("Balanced");
@@ -272,6 +262,9 @@ public partial class MainWindow : Window
         DiartDeltaLabel.Text = L("DiartDeltaNew");
         DiartDeltaLabel.ToolTip = L("DiartDeltaNewHelp");
         DiartDeltaBox.ToolTip = L("DiartDeltaNewHelp");
+        ModelDetailsGroupTitle.Text = L("ModelDetailsGroup");
+        ModelDetailsDescriptionText.Text = L("ModelDetailsDescription");
+        AutomaticSettingsTitleText.Text = L("AutomaticSettingsTitle");
         TranslateApiLabel.Text = L("TranslateApi");
         TargetLanguageLabel.Text = L("TargetLanguage");
         UpdateTranslationProviderAvailabilityText();
@@ -1226,11 +1219,15 @@ public partial class MainWindow : Window
         }
 
         ApplyAsrEngineUiState(normalizeSelection: true);
+        if (sender == SpeakerProcessingModelBox)
+        {
+            ApplySpeakerProcessingChoiceToState();
+        }
         if (sender == InputModeBox)
         {
             UpdateAudioInputUiState();
         }
-        if (sender == ComputeModeBox || sender == AsrEngineBox || sender == SttModelBox || sender == SpeechSeparationModelBox)
+        if (sender == ComputeModeBox || sender == AsrEngineBox || sender == SttModelBox || sender == SpeakerProcessingModelBox)
         {
             UpdateSpeechSeparationRecommendation(normalizeSelection: true);
         }
@@ -1245,6 +1242,11 @@ public partial class MainWindow : Window
 
     private void RestartSetting_CheckedChanged(object sender, RoutedEventArgs e)
     {
+        if (suppressSettingsChange)
+        {
+            return;
+        }
+
         NormalizeDiarizationForSpeakerCount();
         ApplyAsrEngineUiState(normalizeSelection: true);
         UpdateSpeakerProcessingUiState();
@@ -1255,13 +1257,25 @@ public partial class MainWindow : Window
 
     private void RestartSetting_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
+        if (suppressSettingsChange)
+        {
+            return;
+        }
+
         UpdateSttPresetSummary();
+        UpdateSpeakerProcessingUiState();
         _ = QueueSettingsApplyAsync(restartIfRunning: true);
     }
 
     private void RestartSetting_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (suppressSettingsChange)
+        {
+            return;
+        }
+
         UpdateSttPresetSummary();
+        UpdateSpeakerProcessingUiState();
         _ = QueueSettingsApplyAsync(restartIfRunning: true);
     }
 
@@ -1386,7 +1400,7 @@ public partial class MainWindow : Window
         }
 
         PopulateSpeechSeparationModelItems(requested, computeMode, asrEngine, sttModel);
-        UpdateEffectiveSpeechSeparationText(requested);
+        PopulateSpeakerProcessingModelItems(SpeakerProcessingChoiceFromState(), computeMode, asrEngine, sttModel);
         UpdateSpeakerProcessingUiState(requested);
         var gpu = hardwareProfile.HasNvidiaGpu
             ? LF("HardwareGpuSummary", hardwareProfile.GpuName ?? "NVIDIA GPU", hardwareProfile.GpuMemoryGiB)
@@ -1485,33 +1499,184 @@ public partial class MainWindow : Window
         SpeechSeparationModelBox.Items.Add(item);
     }
 
-    private void UpdateEffectiveSpeechSeparationText(SpeechSeparationModel requested)
+    private void PopulateSpeakerProcessingModelItems(
+        string requestedChoice,
+        ComputeMode computeMode,
+        AsrEngine asrEngine,
+        string? sttModel)
     {
-        var effective = SpeechSeparationAdvisor.Resolve(requested, speechSeparationRecommendation);
-        SpeechSeparationEffectiveText.Text = requested switch
+        var previousSuppression = suppressSettingsChange;
+        suppressSettingsChange = true;
+        try
         {
-            SpeechSeparationModel.Auto when effective != SpeechSeparationModel.None => LF(
-                "SpeechSeparationEffectiveAuto",
-                SpeechSeparationAdvisor.DisplayName(effective)),
-            SpeechSeparationModel.None => L("SpeechSeparationEffectiveOff"),
-            _ when effective != SpeechSeparationModel.None => LF(
-                "SpeechSeparationEffectiveManual",
-                SpeechSeparationAdvisor.DisplayName(effective)),
-            _ => L("SpeechSeparationEffectiveOff")
+            SpeakerProcessingModelBox.Items.Clear();
+            AddSpeakerProcessingItem(
+                LF("SpeakerProcessingAutoWithModel", AutomaticSpeakerProcessingModelName()),
+                "Auto",
+                tooltip: L("SpeakerProcessingAutoHelp"));
+            AddSpeakerProcessingItem(L("SpeechSeparationOff"), "Off", tooltip: L("SpeakerModelOffDescription"));
+
+            foreach (var option in SpeechSeparationAdvisor.Catalog)
+            {
+                var assessment = SpeechSeparationAdvisor.Assess(
+                    hardwareProfile,
+                    computeMode,
+                    asrEngine,
+                    option.Model,
+                    sttModel);
+                AddSpeakerProcessingItem(
+                    assessment.IsSupported
+                        ? option.DisplayName
+                        : LF("SpeechSeparationUnavailableItem", option.DisplayName),
+                    option.Model.ToString(),
+                    assessment.IsSupported,
+                    LocalizedSpeechSeparationAssessment(assessment));
+            }
+
+            AddSpeakerProcessingItem(L("PyannoteCommunity"), "PyannoteCommunity", tooltip: L("SpeakerModelCommunityDescription"));
+            AddSpeakerProcessingItem(L("DiartRealtime"), "Diart", tooltip: L("SpeakerModelDiartDescription"));
+            AddSpeakerProcessingItem(L("Sortformer"), "Sortformer", tooltip: L("SpeakerModelSortformerDescription"));
+            SelectByTag(SpeakerProcessingModelBox, requestedChoice);
+            if (SpeakerProcessingModelBox.SelectedItem is null)
+            {
+                SelectByTag(SpeakerProcessingModelBox, "Auto");
+            }
+        }
+        finally
+        {
+            suppressSettingsChange = previousSuppression;
+        }
+    }
+
+    private void AddSpeakerProcessingItem(
+        string content,
+        string tag,
+        bool isEnabled = true,
+        string? tooltip = null)
+    {
+        var item = new ComboBoxItem
+        {
+            Content = content,
+            Tag = tag,
+            IsEnabled = isEnabled,
+            ToolTip = tooltip
         };
+        ToolTipService.SetShowOnDisabled(item, true);
+        SpeakerProcessingModelBox.Items.Add(item);
+    }
+
+    private string SpeakerProcessingChoiceFromState()
+    {
+        var separation = ParseSelectedTag(SpeechSeparationModelBox, settings.SpeechSeparationModel);
+        if (separation == SpeechSeparationModel.Auto)
+        {
+            return "Auto";
+        }
+
+        if (separation == SpeechSeparationModel.MossFormer2)
+        {
+            return "MossFormer2";
+        }
+
+        if (separation == SpeechSeparationModel.SepFormerWhamr16k)
+        {
+            return "SepFormerWhamr16k";
+        }
+
+        if (DiarizationCheck.IsChecked != true)
+        {
+            return "Off";
+        }
+
+        return SelectedDiarizationModel().ToString();
+    }
+
+    private string SelectedSpeakerProcessingChoice()
+    {
+        return (SpeakerProcessingModelBox.SelectedItem as ComboBoxItem)?.Tag?.ToString()
+            ?? SpeakerProcessingChoiceFromState();
+    }
+
+    private void ApplySpeakerProcessingChoiceToState()
+    {
+        var choice = SelectedSpeakerProcessingChoice();
+        var previousSuppression = suppressSettingsChange;
+        suppressSettingsChange = true;
+        try
+        {
+            switch (choice)
+            {
+                case "Auto":
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.Auto.ToString());
+                    DiarizationCheck.IsChecked = true;
+                    SelectDiarizationModel(AutomaticDiarizationModel());
+                    break;
+                case "MossFormer2":
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.MossFormer2.ToString());
+                    DiarizationCheck.IsChecked = false;
+                    break;
+                case "SepFormerWhamr16k":
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.SepFormerWhamr16k.ToString());
+                    DiarizationCheck.IsChecked = false;
+                    break;
+                case "PyannoteCommunity":
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.None.ToString());
+                    DiarizationCheck.IsChecked = true;
+                    SelectDiarizationModel(DiarizationModel.PyannoteCommunity);
+                    break;
+                case "Diart":
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.None.ToString());
+                    DiarizationCheck.IsChecked = true;
+                    SelectDiarizationModel(DiarizationModel.Diart);
+                    break;
+                case "Sortformer":
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.None.ToString());
+                    DiarizationCheck.IsChecked = true;
+                    SelectDiarizationModel(DiarizationModel.Sortformer);
+                    break;
+                default:
+                    SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.None.ToString());
+                    DiarizationCheck.IsChecked = false;
+                    break;
+            }
+        }
+        finally
+        {
+            suppressSettingsChange = previousSuppression;
+        }
+    }
+
+    private DiarizationModel AutomaticDiarizationModel()
+    {
+        var engine = ParseSelectedTag(AsrEngineBox, settings.AsrEngine);
+        return engine == AsrEngine.WhisperLiveKitSortformer
+            ? DiarizationModel.Sortformer
+            : DiarizationModel.PyannoteCommunity;
+    }
+
+    private string AutomaticSpeakerProcessingModelName()
+    {
+        var effectiveSeparation = SpeechSeparationAdvisor.Resolve(
+            SpeechSeparationModel.Auto,
+            speechSeparationRecommendation);
+        return effectiveSeparation != SpeechSeparationModel.None
+            ? SpeechSeparationAdvisor.DisplayName(effectiveSeparation)
+            : LocalizedDiarizationModelName(AutomaticDiarizationModel());
     }
 
     private void UpdateSpeakerProcessingUiState(SpeechSeparationModel? requested = null)
     {
-        if (DiarizationSettingsPanel is null ||
-            DiarizationConfigurationPanel is null ||
-            DiarizationInactiveNoticeText is null ||
-            SpeakerProcessingStatusText is null)
+        if (SpeakerProcessingOptionsPanel is null ||
+            SpeakerProcessingStatusText is null ||
+            SpeakerProcessingEffectiveText is null)
         {
             return;
         }
 
-        var selectedSeparation = requested ?? ParseSelectedTag(
+        _ = requested;
+        ApplySpeakerProcessingChoiceToState();
+        var choice = SelectedSpeakerProcessingChoice();
+        var selectedSeparation = ParseSelectedTag(
             SpeechSeparationModelBox,
             settings.SpeechSeparationModel);
         var effectiveSeparation = SpeechSeparationAdvisor.Resolve(
@@ -1519,26 +1684,145 @@ public partial class MainWindow : Window
             speechSeparationRecommendation);
         var separationActive = effectiveSeparation != SpeechSeparationModel.None;
         var identificationEnabled = DiarizationCheck.IsChecked == true;
+        var activeDiarizationModel = SelectedDiarizationModel();
+        var processingOff = !separationActive && !identificationEnabled;
+        var identificationActive = !separationActive && identificationEnabled;
+        var presetAvailable = identificationActive && activeDiarizationModel is not DiarizationModel.Sortformer;
 
-        DiarizationSettingsPanel.IsEnabled = !separationActive;
-        DiarizationSettingsPanel.Opacity = separationActive ? 0.48 : 1.0;
-        DiarizationInactiveNoticeText.Visibility = separationActive
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        DiarizationConfigurationPanel.IsEnabled = !separationActive && identificationEnabled;
-        DiarizationConfigurationPanel.Opacity = identificationEnabled ? 1.0 : 0.48;
+        ApplySpeakerProcessingConstraints(separationActive, identificationActive);
+        SpeakerProcessingOptionsPanel.IsEnabled = !processingOff;
+        SpeakerProcessingOptionsPanel.Opacity = processingOff ? 0.45 : 1.0;
+        DiarizationPresetPanel.IsEnabled = presetAvailable;
+        DiarizationPresetPanel.Opacity = presetAvailable ? 1.0 : 0.45;
+        SpeakerCountPanel.IsEnabled = identificationActive;
+        SpeakerCountPanel.Opacity = identificationActive ? 1.0 : 0.55;
+        SpeakerCountModePanel.IsEnabled = identificationActive;
+        SpeakerCountModePanel.Opacity = identificationActive ? 1.0 : 0.55;
 
         if (separationActive)
         {
             SpeakerProcessingStatusText.Text = LF(
                 "SpeakerProcessingStatusSeparation",
                 SpeechSeparationAdvisor.DisplayName(effectiveSeparation));
+        }
+        else
+        {
+            SpeakerProcessingStatusText.Text = identificationEnabled
+                ? LF("SpeakerProcessingStatusIdentification", LocalizedDiarizationModelName(activeDiarizationModel))
+                : L("SpeakerProcessingStatusOff");
+        }
+
+        var activeModelName = separationActive
+            ? SpeechSeparationAdvisor.DisplayName(effectiveSeparation)
+            : identificationEnabled
+                ? LocalizedDiarizationModelName(activeDiarizationModel)
+                : L("SpeechSeparationOff");
+        SpeakerProcessingEffectiveText.Text = choice == "Auto"
+            ? LF("SpeakerProcessingEffectiveAuto", activeModelName)
+            : LF("SpeakerProcessingEffectiveManual", activeModelName);
+        UpdateModelDetailsPanel(separationActive, identificationActive, effectiveSeparation, activeDiarizationModel);
+    }
+
+    private void ApplySpeakerProcessingConstraints(bool separationActive, bool identificationActive)
+    {
+        var previousSuppression = suppressSettingsChange;
+        suppressSettingsChange = true;
+        try
+        {
+            MaxSpeakers1Radio.IsEnabled = false;
+            if (separationActive)
+            {
+                MaxSpeakers2Radio.IsChecked = true;
+                SpeakerModeExactRadio.IsChecked = true;
+                return;
+            }
+
+            if (identificationActive && SelectedSpeakerCountMax() < 2)
+            {
+                MaxSpeakers2Radio.IsChecked = true;
+            }
+        }
+        finally
+        {
+            suppressSettingsChange = previousSuppression;
+        }
+    }
+
+    private void UpdateModelDetailsPanel(
+        bool separationActive,
+        bool identificationActive,
+        SpeechSeparationModel effectiveSeparation,
+        DiarizationModel activeDiarizationModel)
+    {
+        if (SelectedAsrModelTitleText is null || SelectedSpeakerModelTitleText is null)
+        {
             return;
         }
 
-        SpeakerProcessingStatusText.Text = identificationEnabled
-            ? LF("SpeakerProcessingStatusIdentification", LocalizedDiarizationModelName(SelectedDiarizationModel()))
-            : L("SpeakerProcessingStatusOff");
+        var engine = ParseSelectedTag(AsrEngineBox, settings.AsrEngine);
+        var engineName = SelectedContent(AsrEngineBox, engine.ToString());
+        var sttModel = SelectedContent(SttModelBox, settings.SttModel);
+        SelectedAsrModelTitleText.Text = LF("SelectedAsrModelTitle", engineName, sttModel);
+        SelectedAsrModelDescriptionText.Text = engine switch
+        {
+            AsrEngine.Qwen3Asr => LF("AsrModelDetailsQwen", sttModel),
+            AsrEngine.WhisperLiveKitSortformer => LF("AsrModelDetailsWhisperLiveKit", sttModel),
+            AsrEngine.WhisperX => LF("AsrModelDetailsWhisperX", sttModel),
+            _ => LF("AsrModelDetailsFasterWhisper", sttModel)
+        };
+
+        var choice = SelectedSpeakerProcessingChoice();
+        var speakerModelName = separationActive
+            ? SpeechSeparationAdvisor.DisplayName(effectiveSeparation)
+            : identificationActive
+                ? LocalizedDiarizationModelName(activeDiarizationModel)
+                : L("SpeechSeparationOff");
+        var selectionMode = choice == "Auto" ? L("AutomaticSelection") : L("ManualSelection");
+        SelectedSpeakerModelTitleText.Text = LF("SelectedSpeakerModelTitle", speakerModelName, selectionMode);
+        SelectedSpeakerModelDescriptionText.Text = separationActive
+            ? effectiveSeparation == SpeechSeparationModel.MossFormer2
+                ? L("SpeakerModelMossDescription")
+                : L("SpeakerModelSepFormerDescription")
+            : identificationActive
+                ? activeDiarizationModel switch
+                {
+                    DiarizationModel.Diart => L("SpeakerModelDiartDescription"),
+                    DiarizationModel.Sortformer => L("SpeakerModelSortformerDescription"),
+                    _ => L("SpeakerModelCommunityDescription")
+                }
+                : L("SpeakerModelOffDescription");
+
+        if (separationActive)
+        {
+            CurrentSpeakerSettingsText.Text = L("SpeakerSettingsSeparated");
+            var assessment = SpeechSeparationAdvisor.Assess(
+                hardwareProfile,
+                ParseSelectedTag(ComputeModeBox, settings.ComputeMode),
+                engine,
+                effectiveSeparation,
+                sttModel);
+            ModelCompatibilityText.Text = LocalizedSpeechSeparationAssessment(assessment);
+            return;
+        }
+
+        if (!identificationActive)
+        {
+            CurrentSpeakerSettingsText.Text = L("SpeakerSettingsOff");
+            ModelCompatibilityText.Text = L("SpeakerModelOffCompatibility");
+            return;
+        }
+
+        var speakerCount = SelectedSpeakerCountMax();
+        var speakerMode = SelectedSpeakerCountMode() == SpeakerCountMode.Exact
+            ? LF("ExactSpeakers", speakerCount)
+            : LF("AutoMax", speakerCount);
+        var preset = activeDiarizationModel == DiarizationModel.Sortformer
+            ? L("AutomaticSelection")
+            : SttPresetName(SelectedDiarizationQualityPreset());
+        CurrentSpeakerSettingsText.Text = LF("SpeakerSettingsIdentification", preset, speakerMode);
+        ModelCompatibilityText.Text = activeDiarizationModel == DiarizationModel.Sortformer
+            ? L("SpeakerModelSortformerCompatibility")
+            : L("SpeakerModelHfCompatibility");
     }
 
     private string LocalizedDiarizationModelName(DiarizationModel model)
@@ -1858,6 +2142,11 @@ public partial class MainWindow : Window
             DiarizationCheck.IsChecked = settings.DiarizationEnabled;
             NormalizeDiarizationForSpeakerCount();
             SelectDiarizationModel(settings.DiarizationModel);
+            PopulateSpeakerProcessingModelItems(
+                SpeakerProcessingChoiceFromState(),
+                settings.ComputeMode,
+                settings.AsrEngine,
+                settings.SttModel);
             DiartManualCheck.IsChecked = settings.DiartManualSettings;
             SetDoubleText(DiartDurationBox, settings.DiartDurationSeconds);
             SetDoubleText(DiartStepBox, settings.DiartStepSeconds);
@@ -1889,6 +2178,7 @@ public partial class MainWindow : Window
         settings.SttQualityPreset = SelectedSttQualityPreset();
         settings.DiarizationQualityPreset = SelectedDiarizationQualityPreset();
         settings.ComputeMode = ParseSelectedTag(ComputeModeBox, settings.ComputeMode);
+        ApplySpeakerProcessingChoiceToState();
         settings.SpeechSeparationModel = ParseSelectedTag(
             SpeechSeparationModelBox,
             settings.SpeechSeparationModel);
@@ -2175,7 +2465,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var speakerIdentificationAvailable = DiarizationSettingsPanel.IsEnabled &&
+        var speakerIdentificationAvailable = SelectedEffectiveSpeechSeparationModel() == SpeechSeparationModel.None &&
             DiarizationCheck.IsChecked == true;
         var isDiart = speakerIdentificationAvailable &&
             SelectedDiarizationModel() == DiarizationModel.Diart;
@@ -2389,9 +2679,10 @@ public partial class MainWindow : Window
 
     private void NormalizeDiarizationForSpeakerCount()
     {
-        if (SelectedSpeakerCountMax() == 1 && DiarizationCheck.IsChecked == true)
+        var choice = SelectedSpeakerProcessingChoice();
+        if (SelectedSpeakerCountMax() == 1 && choice is not "Off")
         {
-            DiarizationCheck.IsChecked = false;
+            MaxSpeakers2Radio.IsChecked = true;
         }
     }
 
