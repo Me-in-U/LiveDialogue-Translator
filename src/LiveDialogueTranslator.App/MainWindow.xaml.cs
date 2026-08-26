@@ -1313,7 +1313,8 @@ public partial class MainWindow : Window
             requested = SpeechSeparationModel.Auto;
         }
 
-        PopulateSpeechSeparationModelItems(requested);
+        PopulateSpeechSeparationModelItems(requested, computeMode, asrEngine, sttModel);
+        UpdateEffectiveSpeechSeparationText(requested);
         var gpu = hardwareProfile.HasNvidiaGpu
             ? LF("HardwareGpuSummary", hardwareProfile.GpuName ?? "NVIDIA GPU", hardwareProfile.GpuMemoryGiB)
             : L("HardwareNoSupportedGpu");
@@ -1339,18 +1340,44 @@ public partial class MainWindow : Window
         }
     }
 
-    private void PopulateSpeechSeparationModelItems(SpeechSeparationModel requested)
+    private void PopulateSpeechSeparationModelItems(
+        SpeechSeparationModel requested,
+        ComputeMode computeMode,
+        AsrEngine asrEngine,
+        string? sttModel)
     {
         var previousSuppression = suppressSettingsChange;
         suppressSettingsChange = true;
         try
         {
             SpeechSeparationModelBox.Items.Clear();
-            AddSpeechSeparationItem(L("SpeechSeparationAuto"), SpeechSeparationModel.Auto);
+            var automaticModel = speechSeparationRecommendation.IsAvailable
+                ? CompactSpeechSeparationDisplayName(speechSeparationRecommendation.Model)
+                : L("SpeechSeparationOff");
+            AddSpeechSeparationItem(
+                LF("SpeechSeparationAutoWithModel", automaticModel),
+                SpeechSeparationModel.Auto,
+                tooltip: speechSeparationRecommendation.IsAvailable
+                    ? LF(
+                        "SpeechSeparationEffectiveAuto",
+                        SpeechSeparationAdvisor.DisplayName(speechSeparationRecommendation.Model))
+                    : L("SpeechSeparationEffectiveOff"));
             AddSpeechSeparationItem(L("SpeechSeparationOff"), SpeechSeparationModel.None);
-            foreach (var model in speechSeparationRecommendation.SupportedModels)
+            foreach (var option in SpeechSeparationAdvisor.Catalog)
             {
-                AddSpeechSeparationItem(SpeechSeparationAdvisor.DisplayName(model), model);
+                var assessment = SpeechSeparationAdvisor.Assess(
+                    hardwareProfile,
+                    computeMode,
+                    asrEngine,
+                    option.Model,
+                    sttModel);
+                AddSpeechSeparationItem(
+                    assessment.IsSupported
+                        ? option.DisplayName
+                        : LF("SpeechSeparationUnavailableItem", option.DisplayName),
+                    option.Model,
+                    assessment.IsSupported,
+                    LocalizedSpeechSeparationAssessment(assessment));
             }
 
             var selectable = requested is SpeechSeparationModel.Auto or SpeechSeparationModel.None ||
@@ -1365,13 +1392,69 @@ public partial class MainWindow : Window
         }
     }
 
-    private void AddSpeechSeparationItem(string content, SpeechSeparationModel model)
+    private void AddSpeechSeparationItem(
+        string content,
+        SpeechSeparationModel model,
+        bool isEnabled = true,
+        string? tooltip = null)
     {
-        SpeechSeparationModelBox.Items.Add(new ComboBoxItem
+        var item = new ComboBoxItem
         {
             Content = content,
-            Tag = model.ToString()
-        });
+            Tag = model.ToString(),
+            IsEnabled = isEnabled,
+            ToolTip = tooltip
+        };
+        ToolTipService.SetShowOnDisabled(item, true);
+        SpeechSeparationModelBox.Items.Add(item);
+    }
+
+    private void UpdateEffectiveSpeechSeparationText(SpeechSeparationModel requested)
+    {
+        var effective = SpeechSeparationAdvisor.Resolve(requested, speechSeparationRecommendation);
+        SpeechSeparationEffectiveText.Text = requested switch
+        {
+            SpeechSeparationModel.Auto when effective != SpeechSeparationModel.None => LF(
+                "SpeechSeparationEffectiveAuto",
+                SpeechSeparationAdvisor.DisplayName(effective)),
+            SpeechSeparationModel.None => L("SpeechSeparationEffectiveOff"),
+            _ when effective != SpeechSeparationModel.None => LF(
+                "SpeechSeparationEffectiveManual",
+                SpeechSeparationAdvisor.DisplayName(effective)),
+            _ => L("SpeechSeparationEffectiveOff")
+        };
+    }
+
+    private string LocalizedSpeechSeparationAssessment(SpeechSeparationAssessment assessment)
+    {
+        return assessment.BlockReason switch
+        {
+            SpeechSeparationBlockReason.CpuMode => L("SpeechSeparationReasonCpu"),
+            SpeechSeparationBlockReason.StreamingAsr => L("SpeechSeparationReasonStreamingAsr"),
+            SpeechSeparationBlockReason.NvidiaGpuRequired => L("SpeechSeparationReasonNoGpu"),
+            SpeechSeparationBlockReason.InsufficientGpuMemory => LF(
+                "SpeechSeparationInsufficientVram",
+                hardwareProfile.GpuMemoryGiB,
+                assessment.RequiredGpuMemoryBytes / (double)SpeechSeparationAdvisor.GiB),
+            SpeechSeparationBlockReason.InsufficientSystemMemory => LF(
+                "SpeechSeparationInsufficientRam",
+                hardwareProfile.MemoryGiB,
+                assessment.RequiredSystemMemoryBytes / (double)SpeechSeparationAdvisor.GiB),
+            _ => LF(
+                "SpeechSeparationRequirements",
+                assessment.RequiredGpuMemoryBytes / (double)SpeechSeparationAdvisor.GiB,
+                assessment.RequiredSystemMemoryBytes / (double)SpeechSeparationAdvisor.GiB)
+        };
+    }
+
+    private static string CompactSpeechSeparationDisplayName(SpeechSeparationModel model)
+    {
+        return model switch
+        {
+            SpeechSeparationModel.MossFormer2 => "MossFormer2",
+            SpeechSeparationModel.SepFormerWhamr16k => "SepFormer",
+            _ => SpeechSeparationAdvisor.DisplayName(model)
+        };
     }
 
     private string LocalizedSpeechSeparationReason(ComputeMode computeMode, AsrEngine asrEngine)
@@ -1613,7 +1696,11 @@ public partial class MainWindow : Window
             SelectDiarizationPreset(settings.DiarizationQualityPreset);
             OverlayOpacitySlider.Value = Math.Clamp(settings.Overlay.Opacity * 100.0, 0.0, 100.0);
             SelectByTag(ComputeModeBox, settings.ComputeMode.ToString());
-            PopulateSpeechSeparationModelItems(settings.SpeechSeparationModel);
+            PopulateSpeechSeparationModelItems(
+                settings.SpeechSeparationModel,
+                settings.ComputeMode,
+                settings.AsrEngine,
+                settings.SttModel);
             SelectByTag(TranslateProviderBox, settings.TranslateProvider.ToString());
             SelectByTag(TargetLanguageBox, settings.TargetLanguage);
             SelectCaptionDisplayMode(settings.CaptionDisplayMode);

@@ -37,6 +37,23 @@ public sealed record SpeechSeparationRecommendation(
     public bool IsAvailable => Model != SpeechSeparationModel.None;
 }
 
+public enum SpeechSeparationBlockReason
+{
+    None,
+    CpuMode,
+    StreamingAsr,
+    NvidiaGpuRequired,
+    InsufficientGpuMemory,
+    InsufficientSystemMemory
+}
+
+public sealed record SpeechSeparationAssessment(
+    SpeechSeparationModel Model,
+    bool IsSupported,
+    long RequiredGpuMemoryBytes,
+    long RequiredSystemMemoryBytes,
+    SpeechSeparationBlockReason BlockReason);
+
 public static class SpeechSeparationAdvisor
 {
     public const long GiB = 1024L * 1024L * 1024L;
@@ -61,6 +78,10 @@ public static class SpeechSeparationAdvisor
         AsrEngine asrEngine,
         string? sttModel = null)
     {
+        var assessments = Catalog
+            .Select(option => Assess(profile, computeMode, asrEngine, option.Model, sttModel))
+            .ToArray();
+
         if (computeMode == ComputeMode.Cpu)
         {
             return Disabled("CPU mode cannot meet the five-second separation and translation target.");
@@ -76,15 +97,9 @@ public static class SpeechSeparationAdvisor
             return Disabled("A CUDA-capable NVIDIA GPU is required for the five-second target.");
         }
 
-        var asrGpuMemory = RequiredAsrGpuMemory(asrEngine, sttModel);
-        var asrSystemMemory = RequiredAsrSystemMemory(asrEngine, sttModel);
-        var supported = Catalog
-            .Where(option =>
-                profile.GpuMemoryBytes >= Math.Max(
-                    option.MinimumGpuMemoryBytes,
-                    asrGpuMemory + SeparationWorkingMemory(option.Model)) &&
-                profile.MemoryBytes >= Math.Max(option.MinimumSystemMemoryBytes, asrSystemMemory))
-            .Select(option => option.Model)
+        var supported = assessments
+            .Where(assessment => assessment.IsSupported)
+            .Select(assessment => assessment.Model)
             .ToArray();
 
         if (supported.Contains(SpeechSeparationModel.MossFormer2))
@@ -104,6 +119,49 @@ public static class SpeechSeparationAdvisor
         }
 
         return Disabled("No supported separation model has enough GPU and system memory for the five-second target.");
+    }
+
+    public static SpeechSeparationAssessment Assess(
+        HardwareProfile profile,
+        ComputeMode computeMode,
+        AsrEngine asrEngine,
+        SpeechSeparationModel model,
+        string? sttModel = null)
+    {
+        var option = Catalog.FirstOrDefault(candidate => candidate.Model == model);
+        if (option is null)
+        {
+            return new SpeechSeparationAssessment(
+                model,
+                false,
+                0,
+                0,
+                SpeechSeparationBlockReason.NvidiaGpuRequired);
+        }
+
+        var requiredGpuMemory = Math.Max(
+            option.MinimumGpuMemoryBytes,
+            RequiredAsrGpuMemory(asrEngine, sttModel) + SeparationWorkingMemory(model));
+        var requiredSystemMemory = Math.Max(
+            option.MinimumSystemMemoryBytes,
+            RequiredAsrSystemMemory(asrEngine, sttModel));
+
+        var blockReason = computeMode switch
+        {
+            ComputeMode.Cpu => SpeechSeparationBlockReason.CpuMode,
+            _ when asrEngine == AsrEngine.WhisperLiveKitSortformer => SpeechSeparationBlockReason.StreamingAsr,
+            _ when !profile.HasNvidiaGpu => SpeechSeparationBlockReason.NvidiaGpuRequired,
+            _ when profile.GpuMemoryBytes < requiredGpuMemory => SpeechSeparationBlockReason.InsufficientGpuMemory,
+            _ when profile.MemoryBytes < requiredSystemMemory => SpeechSeparationBlockReason.InsufficientSystemMemory,
+            _ => SpeechSeparationBlockReason.None
+        };
+
+        return new SpeechSeparationAssessment(
+            model,
+            blockReason == SpeechSeparationBlockReason.None,
+            requiredGpuMemory,
+            requiredSystemMemory,
+            blockReason);
     }
 
     public static SpeechSeparationModel Resolve(

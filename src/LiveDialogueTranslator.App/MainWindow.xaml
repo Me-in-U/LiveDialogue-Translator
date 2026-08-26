@@ -468,8 +468,14 @@
                                 <ComboBoxItem Content="Auto recommendation" Tag="Auto" />
                                 <ComboBoxItem Content="Off" Tag="None" />
                             </ComboBox>
-                            <TextBlock x:Name="HardwareSummaryText"
+                            <TextBlock x:Name="SpeechSeparationEffectiveText"
                                        Margin="2,4,0,0"
+                                       FontSize="10.5"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource AccentBrush}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock x:Name="HardwareSummaryText"
+                                       Margin="2,3,0,0"
                                        FontSize="10.5"
                                        Foreground="{StaticResource MutedBrush}"
                                        TextWrapping="Wrap"

@@ -41,6 +41,13 @@ met. CPU mode, missing NVIDIA CUDA, insufficient memory, and WhisperLiveKit
 result in Off. A manually selected model that is no longer supported by the
 current hardware is reset to Auto.
 
+The selector shows the effective automatic choice in its closed state, such as
+`Auto: MossFormer2`. Both integrated models remain visible in the drop-down.
+A model that cannot run with the current ASR and hardware combination is
+disabled instead of disappearing, and its tooltip shows the required VRAM or
+RAM. This separates product support from compatibility with the current
+configuration.
+
 WhisperLiveKit is excluded because it owns one stateful streaming ASR session.
 Feeding two independently separated streams into that one session would mix
 state and timestamps.

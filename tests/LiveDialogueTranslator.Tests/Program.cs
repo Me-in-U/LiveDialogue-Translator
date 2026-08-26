@@ -2268,12 +2268,28 @@ static void SpeechSeparationAdvisorRecommendsModelsByHardware()
         ComputeMode.Cuda,
         AsrEngine.Qwen3Asr,
         "qwen3-asr-1.7b");
+    var qwenLightRecommendation = SpeechSeparationAdvisor.Recommend(
+        highMemory,
+        ComputeMode.Cuda,
+        AsrEngine.Qwen3Asr,
+        "qwen3-asr-0.6b");
+    var qwenHeavyMossAssessment = SpeechSeparationAdvisor.Assess(
+        highMemory,
+        ComputeMode.Cuda,
+        AsrEngine.Qwen3Asr,
+        SpeechSeparationModel.MossFormer2,
+        "qwen3-asr-1.7b");
 
     Assert.Equal(SpeechSeparationModel.MossFormer2, highRecommendation.Model);
     Assert.Equal(2, highRecommendation.SupportedModels.Count);
     Assert.Equal(SpeechSeparationModel.SepFormerWhamr16k, lowerRecommendation.Model);
     Assert.Equal(1, lowerRecommendation.SupportedModels.Count);
     Assert.Equal(SpeechSeparationModel.None, qwenHeavyRecommendation.Model);
+    Assert.Equal(SpeechSeparationModel.MossFormer2, qwenLightRecommendation.Model);
+    Assert.Equal(2, qwenLightRecommendation.SupportedModels.Count);
+    Assert.True(!qwenHeavyMossAssessment.IsSupported, "Qwen 1.7B and MossFormer2 must not be offered on a 12 GB GPU.");
+    Assert.Equal(13 * SpeechSeparationAdvisor.GiB, qwenHeavyMossAssessment.RequiredGpuMemoryBytes);
+    Assert.Equal(SpeechSeparationBlockReason.InsufficientGpuMemory, qwenHeavyMossAssessment.BlockReason);
 }
 
 static void SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths()
@@ -2331,10 +2347,16 @@ static void MainWindowExposesAutomaticHardwareBasedSpeechSeparation()
     var detector = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "HardwareDetectionService.cs"));
 
     Assert.Contains("x:Name=\"SpeechSeparationModelBox\"", xaml);
+    Assert.Contains("x:Name=\"SpeechSeparationEffectiveText\"", xaml);
     Assert.Contains("x:Name=\"HardwareSummaryText\"", xaml);
     Assert.Contains("x:Name=\"RedetectHardwareButton\"", xaml);
     Assert.Contains("await hardwareDetection.DetectAsync()", source);
     Assert.Contains("SpeechSeparationAdvisor.Recommend", source);
+    Assert.Contains("SpeechSeparationAdvisor.Catalog", source);
+    Assert.Contains("SpeechSeparationAdvisor.Assess", source);
+    Assert.Contains("SpeechSeparationAutoWithModel", source);
+    Assert.Contains("IsEnabled = isEnabled", source);
+    Assert.Contains("ToolTipService.SetShowOnDisabled", source);
     Assert.Contains("sender == SttModelBox", source);
     Assert.Contains("nvidia-smi", detector);
     Assert.Contains("GlobalMemoryStatusEx", detector);
