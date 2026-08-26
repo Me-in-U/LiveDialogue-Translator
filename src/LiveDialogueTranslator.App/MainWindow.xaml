@@ -463,6 +463,26 @@
                                 <ComboBoxItem Content="CPU" Tag="Cpu" />
                                 <ComboBoxItem Content="CUDA" Tag="Cuda" />
                             </ComboBox>
+                            <TextBlock x:Name="SpeechSeparationLabel" Margin="2,7,0,3" Text="Overlapping Speech" />
+                            <ComboBox x:Name="SpeechSeparationModelBox" Height="28" SelectionChanged="RestartSetting_SelectionChanged">
+                                <ComboBoxItem Content="Auto recommendation" Tag="Auto" />
+                                <ComboBoxItem Content="Off" Tag="None" />
+                            </ComboBox>
+                            <TextBlock x:Name="HardwareSummaryText"
+                                       Margin="2,4,0,0"
+                                       FontSize="10.5"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap"
+                                       Text="Detecting CPU and GPU..." />
+                            <TextBlock x:Name="SpeechSeparationRecommendationText"
+                                       Margin="2,3,0,0"
+                                       FontSize="10.5"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       TextWrapping="Wrap" />
+                            <Button x:Name="RedetectHardwareButton"
+                                    Height="24"
+                                    Margin="0,5,0,0"
+                                    Click="RedetectHardwareButton_Click">Detect again</Button>
                             <TextBlock x:Name="SttPresetLabel" Margin="2,7,0,3" Text="Preset" />
                             <UniformGrid Columns="3" Margin="0,1,0,0">
                                 <RadioButton x:Name="SttPresetSpeedRadio"
@@ -746,6 +766,17 @@
                                     <Run Text=", " />
                                     <Hyperlink Click="SortformerLink_Click">
                                         <Run Text="Sortformer" />
+                                    </Hyperlink>
+                                </TextBlock>
+                                <TextBlock Margin="0,3,0,0" TextWrapping="Wrap">
+                                    <Run x:Name="InfoSpeechSeparationLabelRun" FontWeight="SemiBold" />
+                                    <Run Text=" " />
+                                    <Hyperlink Click="MossFormer2Link_Click">
+                                        <Run Text="MossFormer2_SS_16K" />
+                                    </Hyperlink>
+                                    <Run Text=", " />
+                                    <Hyperlink Click="SepFormerLink_Click">
+                                        <Run Text="SepFormer WHAMR16k" />
                                     </Hyperlink>
                                 </TextBlock>
                                 <TextBlock Margin="0,3,0,0">

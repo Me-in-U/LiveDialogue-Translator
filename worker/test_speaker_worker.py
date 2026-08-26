@@ -3680,6 +3680,121 @@ print("ok")
 
         self.assertEqual("speaker_unknown", assigned)
 
+    def test_speech_separation_model_normalization_only_accepts_integrated_models(self) -> None:
+        self.assertEqual("mossformer2_ss_16k", speaker_worker.normalize_speech_separation_model("MossFormer2_SS_16K"))
+        self.assertEqual("sepformer_whamr16k", speaker_worker.normalize_speech_separation_model("SepFormer"))
+        self.assertEqual("none", speaker_worker.normalize_speech_separation_model("RE-SepFormer"))
+        self.assertEqual("none", speaker_worker.normalize_speech_separation_model("TF-GridNet"))
+
+    def test_speech_separation_uses_two_second_chunks_and_replaces_streaming_diarization(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            engine = speaker_worker.LocalSpeechEngine(Path("models"))
+            engine.configure({
+                "type": "configure",
+                "sttQualityPreset": 100,
+                "diarizationEnabled": True,
+                "diarizationModel": "diart",
+                "speechSeparationModel": "mossformer2_ss_16k",
+            })
+
+        self.assertEqual("mossformer2_ss_16k", engine.config.speech_separation_model)
+        self.assertEqual(int(speaker_worker.BYTES_PER_SECOND * 1.75), engine.transcribe_chunk_bytes())
+        self.assertFalse(engine._uses_streaming_diarization())
+
+    def test_separated_channel_alignment_keeps_speaker_order_after_model_swap(self) -> None:
+        import numpy as np
+
+        first = np.linspace(-0.2, 0.2, 1000, dtype=np.float32)
+        second = np.sin(np.linspace(0, 12, 1000, dtype=np.float32)) * 0.1
+        stems = [
+            np.concatenate([second[-200:], np.full(50, 0.2, dtype=np.float32)]),
+            np.concatenate([first[-200:], np.full(50, 0.1, dtype=np.float32)]),
+        ]
+
+        aligned = speaker_worker.align_separated_channels(stems, [first[-200:], second[-200:]], 200)
+
+        self.assertEqual(2, len(aligned))
+        self.assertAlmostEqual(0.1, float(np.mean(aligned[0])), places=5)
+        self.assertAlmostEqual(0.2, float(np.mean(aligned[1])), places=5)
+
+    def test_overlap_separation_emits_independent_captions_for_two_stems(self) -> None:
+        import numpy as np
+
+        samples = np.arange(speaker_worker.SAMPLE_RATE * 2, dtype=np.float32)
+        first = np.sin(2 * np.pi * 220 * samples / speaker_worker.SAMPLE_RATE).astype(np.float32) * 0.12
+        second = np.sin(2 * np.pi * 440 * samples / speaker_worker.SAMPLE_RATE).astype(np.float32) * 0.08
+        engine = speaker_worker.LocalSpeechEngine(Path("models"))
+        engine.config.speech_separation_model = "mossformer2_ss_16k"
+        engine.config.diarization_enabled = True
+        engine.speech_separator = types.SimpleNamespace(separate=lambda _pcm: [first, second])
+        captions = iter([
+            [speaker_worker.TimedTextPart("hello", 0, 1500, True)],
+            [speaker_worker.TimedTextPart("안녕하세요", 0, 1500, True)],
+        ])
+        engine._transcribe_wav_parts = lambda _path: next(captions)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            handled = engine._try_transcribe_separated_speech(
+                "system",
+                tone_pcm(2),
+                1000,
+                time.perf_counter(),
+            )
+
+        events = [json.loads(line) for line in output.getvalue().splitlines()]
+        final_events = [event for event in events if event["type"] == "final_caption"]
+        self.assertTrue(handled)
+        self.assertEqual(2, len(final_events))
+        self.assertEqual({"speaker_1", "speaker_2"}, {event["speakerId"] for event in final_events})
+        self.assertEqual({"hello", "안녕하세요"}, {event["text"] for event in final_events})
+
+    def test_mossformer_adapter_batches_input_and_trims_model_padding(self) -> None:
+        import numpy as np
+
+        observed_shapes = []
+
+        class FakeClearVoice:
+            def __init__(self, task, model_names):
+                self.task = task
+                self.model_names = model_names
+
+            def __call__(self, samples):
+                observed_shapes.append(samples.shape)
+                padded = samples.shape[1] + 100
+                return [np.ones(padded, dtype=np.float32), np.full(padded, 0.5, dtype=np.float32)]
+
+        original = sys.modules.get("clearvoice")
+        sys.modules["clearvoice"] = types.SimpleNamespace(ClearVoice=FakeClearVoice)
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                separator = speaker_worker.MossFormer2Separator(Path(temp_dir))
+                stems = separator.separate(tone_pcm(1))
+        finally:
+            if original is None:
+                sys.modules.pop("clearvoice", None)
+            else:
+                sys.modules["clearvoice"] = original
+
+        self.assertEqual([(1, speaker_worker.SAMPLE_RATE)], observed_shapes)
+        self.assertEqual([speaker_worker.SAMPLE_RATE, speaker_worker.SAMPLE_RATE], [len(stem) for stem in stems])
+
+    def test_speech_separation_preparation_checks_model_specific_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            moss = root / "speech-separation" / "mossformer2" / "checkpoints" / "MossFormer2_SS_16K"
+            moss.mkdir(parents=True)
+            (moss / "last_best_checkpoint").write_text("checkpoint.pt", encoding="utf-8")
+            sep = root / "speech-separation" / "sepformer-whamr16k"
+            sep.mkdir(parents=True)
+            (sep / "hyperparams.yaml").write_text("modules: {}", encoding="utf-8")
+            (sep / "model.ckpt").write_bytes(b"checkpoint")
+
+            self.assertTrue(speaker_worker.is_speech_separation_model_prepared(root, "mossformer2_ss_16k"))
+            self.assertTrue(speaker_worker.is_speech_separation_model_prepared(root, "sepformer_whamr16k"))
+            self.assertTrue(speaker_worker.is_speech_separation_model_prepared(root, "none"))
+
 
 if __name__ == "__main__":
     unittest.main()

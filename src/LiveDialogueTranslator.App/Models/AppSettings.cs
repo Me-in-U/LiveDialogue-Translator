@@ -32,6 +32,7 @@ public sealed class AppSettings
     public int DiarizationQualityPreset { get; set; } = 100;
     public ComputeMode ComputeMode { get; set; } = ComputeMode.Auto;
     public AsrEngine AsrEngine { get; set; } = AsrEngine.None;
+    public SpeechSeparationModel SpeechSeparationModel { get; set; } = SpeechSeparationModel.Auto;
     public bool DiarizationEnabled { get; set; } = true;
     public DiarizationModel DiarizationModel { get; set; } = DiarizationModel.PyannoteCommunity;
     public bool DiartManualSettings { get; set; }

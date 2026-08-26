@@ -15,13 +15,20 @@ public partial class ModelManagerWindow : Window
     private readonly AppSettings settings;
     private readonly Localizer localizer;
     private readonly PythonRuntimeService pythonRuntime;
+    private readonly SpeechSeparationModel effectiveSpeechSeparationModel;
 
-    public ModelManagerWindow(AppPaths paths, AppSettings settings, Localizer localizer, bool showAccessNotice = false)
+    public ModelManagerWindow(
+        AppPaths paths,
+        AppSettings settings,
+        Localizer localizer,
+        SpeechSeparationModel effectiveSpeechSeparationModel,
+        bool showAccessNotice = false)
     {
         InitializeComponent();
         this.paths = paths;
         this.settings = settings;
         this.localizer = localizer;
+        this.effectiveSpeechSeparationModel = effectiveSpeechSeparationModel;
         pythonRuntime = new PythonRuntimeService(paths, localizer);
         ApplyLocalization();
         TokenBox.Password = settings.HuggingFaceToken ?? "";
@@ -84,7 +91,7 @@ public partial class ModelManagerWindow : Window
 
     private void UpdateModelTermsButtons()
     {
-        if (!RequiresHuggingFaceAccess(settings))
+        if (!RequiresHuggingFaceAccess())
         {
             CommunityTermsButton.Visibility = Visibility.Collapsed;
             DiartSegmentationTermsButton.Visibility = Visibility.Collapsed;
@@ -114,18 +121,24 @@ public partial class ModelManagerWindow : Window
 
         try
         {
-            if (RequiresHuggingFaceAccess(settings) && !await CheckAccessAsync())
+            if (RequiresHuggingFaceAccess() && !await CheckAccessAsync())
             {
                 return;
             }
 
             var pythonExe = await pythonRuntime.EnsureAsync(
                 report: (title, detail, _) => OutputBox.Text = $"{title}{Environment.NewLine}{detail}");
-            if (settings.DiarizationModel == DiarizationModel.Diart && !await InstallDiartAsync(pythonExe))
+            if (effectiveSpeechSeparationModel == SpeechSeparationModel.None &&
+                settings.DiarizationModel == DiarizationModel.Diart &&
+                !await InstallDiartAsync(pythonExe))
             {
                 return;
             }
             if (!await InstallAsrEnginePackagesAsync(pythonExe))
+            {
+                return;
+            }
+            if (!await InstallSpeechSeparationPackagesAsync(pythonExe))
             {
                 return;
             }
@@ -140,13 +153,22 @@ public partial class ModelManagerWindow : Window
                 CreateNoWindow = true
             };
             PythonProcessEnvironment.Apply(psi.Environment);
-            AsrEngineEnvironment.Apply(psi.Environment, paths, settings.AsrEngine, settings.DiarizationModel);
+            AsrEngineEnvironment.Apply(
+                psi.Environment,
+                paths,
+                settings.AsrEngine,
+                settings.DiarizationModel,
+                effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
+            SpeechSeparationEnvironment.Apply(psi.Environment, paths, effectiveSpeechSeparationModel);
             if (!string.IsNullOrWhiteSpace(settings.HuggingFaceToken))
             {
                 psi.Environment["HF_TOKEN"] = settings.HuggingFaceToken;
             }
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_STT_MODEL"] = settings.SttModel;
-            psi.Environment["LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_ENABLED"] = settings.DiarizationEnabled ? "true" : "false";
+            psi.Environment["LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_ENABLED"] =
+                effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled
+                    ? "true"
+                    : "false";
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_MODEL"] = WorkerProtocol.FormatDiarizationModel(settings.DiarizationModel);
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = WorkerProtocol.FormatAsrEngine(settings.AsrEngine);
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_STT_QUALITY_PRESET"] = settings.SttQualityPreset.ToString();
@@ -203,7 +225,10 @@ public partial class ModelManagerWindow : Window
 
     private async Task<bool> InstallAsrEnginePackagesAsync(string pythonExe)
     {
-        var engines = AsrEngineEnvironment.RequiredAsrEngines(settings.AsrEngine, settings.DiarizationModel);
+        var engines = AsrEngineEnvironment.RequiredAsrEngines(
+            settings.AsrEngine,
+            settings.DiarizationModel,
+            effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
         if (engines.Count == 0)
         {
             return true;
@@ -231,7 +256,12 @@ public partial class ModelManagerWindow : Window
                 CreateNoWindow = true
             };
             PythonProcessEnvironment.Apply(psi.Environment);
-            AsrEngineEnvironment.Apply(psi.Environment, paths, settings.AsrEngine, settings.DiarizationModel);
+            AsrEngineEnvironment.Apply(
+                psi.Environment,
+                paths,
+                settings.AsrEngine,
+                settings.DiarizationModel,
+                effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
 
             using var process = Process.Start(psi);
             if (process == null)
@@ -253,6 +283,60 @@ public partial class ModelManagerWindow : Window
         return true;
     }
 
+    private async Task<bool> InstallSpeechSeparationPackagesAsync(string pythonExe)
+    {
+        if (effectiveSpeechSeparationModel is SpeechSeparationModel.None or SpeechSeparationModel.Auto)
+        {
+            return true;
+        }
+
+        var requirementsPath = SpeechSeparationEnvironment.RequirementsPath(effectiveSpeechSeparationModel);
+        if (!File.Exists(requirementsPath))
+        {
+            OutputBox.Text = $"Speech separation requirements file not found: {requirementsPath}";
+            return false;
+        }
+
+        var targetDirectory = paths.SpeechSeparationPackageDirectory(effectiveSpeechSeparationModel);
+        Directory.CreateDirectory(targetDirectory);
+        OutputBox.Text = $"{L("InstallingSpeechSeparationPackages")}{Environment.NewLine}{L("SpeechSeparationPackagesCanTakeMinutes")}";
+        var psi = new ProcessStartInfo
+        {
+            FileName = pythonExe,
+            Arguments = PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, targetDirectory),
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        PythonProcessEnvironment.Apply(psi.Environment);
+        AsrEngineEnvironment.Apply(
+            psi.Environment,
+            paths,
+            settings.AsrEngine,
+            settings.DiarizationModel,
+            effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
+        SpeechSeparationEnvironment.Apply(psi.Environment, paths, effectiveSpeechSeparationModel);
+
+        using var process = Process.Start(psi);
+        if (process == null)
+        {
+            OutputBox.Text = L("UnableToStartPython");
+            return false;
+        }
+
+        var output = await process.StandardOutput.ReadToEndAsync();
+        var error = FilterBenignStderr(await process.StandardError.ReadToEndAsync());
+        await process.WaitForExitAsync();
+        if (process.ExitCode == 0)
+        {
+            return true;
+        }
+
+        OutputBox.Text = $"{L("PythonPackageInstallFailed")}{Environment.NewLine}{output}{Environment.NewLine}{error}";
+        return false;
+    }
+
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         settings.HuggingFaceToken = TokenValue();
@@ -263,7 +347,7 @@ public partial class ModelManagerWindow : Window
     private async Task<bool> CheckAccessAsync()
     {
         settings.HuggingFaceToken = TokenValue();
-        if (!RequiresHuggingFaceAccess(settings))
+        if (!RequiresHuggingFaceAccess())
         {
             OutputBox.Text = L("HfAccessNotRequired");
             return true;
@@ -322,9 +406,10 @@ public partial class ModelManagerWindow : Window
         return string.IsNullOrWhiteSpace(TokenBox.Password) ? null : TokenBox.Password.Trim();
     }
 
-    private static bool RequiresHuggingFaceAccess(AppSettings settings)
+    private bool RequiresHuggingFaceAccess()
     {
-        return settings.DiarizationEnabled &&
+        return effectiveSpeechSeparationModel == SpeechSeparationModel.None &&
+            settings.DiarizationEnabled &&
             settings.DiarizationModel is not DiarizationModel.Sortformer;
     }
 

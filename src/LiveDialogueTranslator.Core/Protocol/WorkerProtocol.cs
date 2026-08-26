@@ -39,6 +39,14 @@ public enum AsrEngine
     WhisperX
 }
 
+public enum SpeechSeparationModel
+{
+    Auto,
+    None,
+    MossFormer2,
+    SepFormerWhamr16k
+}
+
 public sealed record WorkerConfiguration(
     InputMode InputMode,
     string SttModel,
@@ -60,7 +68,8 @@ public sealed record WorkerConfiguration(
     double? DiartDeltaNew = null,
     int DiarizationQualityPreset = 100,
     AsrEngine AsrEngine = AsrEngine.None,
-    SpeakerCountMode SpeakerCountMode = SpeakerCountMode.ActiveMax);
+    SpeakerCountMode SpeakerCountMode = SpeakerCountMode.ActiveMax,
+    SpeechSeparationModel SpeechSeparationModel = SpeechSeparationModel.None);
 
 public sealed record WorkerCommand(string Type, IReadOnlyDictionary<string, object?> Payload);
 
@@ -146,6 +155,7 @@ public static class WorkerProtocol
             ["showLatency"] = configuration.ShowLatency,
             ["speakerNames"] = configuration.SpeakerNames,
             ["asrEngine"] = FormatAsrEngine(configuration.AsrEngine),
+            ["speechSeparationModel"] = FormatSpeechSeparationModel(configuration.SpeechSeparationModel),
             ["diartManualSettings"] = configuration.DiartManualSettings
         };
 
@@ -290,6 +300,18 @@ public static class WorkerProtocol
             SpeakerCountMode.SessionMax => "session_max",
             SpeakerCountMode.ActiveMax => "active_max",
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+        };
+    }
+
+    public static string FormatSpeechSeparationModel(SpeechSeparationModel model)
+    {
+        return model switch
+        {
+            SpeechSeparationModel.Auto => "auto",
+            SpeechSeparationModel.None => "none",
+            SpeechSeparationModel.MossFormer2 => "mossformer2_ss_16k",
+            SpeechSeparationModel.SepFormerWhamr16k => "sepformer_whamr16k",
+            _ => throw new ArgumentOutOfRangeException(nameof(model), model, null)
         };
     }
 

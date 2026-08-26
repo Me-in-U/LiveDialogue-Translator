@@ -80,6 +80,8 @@ controls for clearing logs and keeping the view pinned to the latest output.
   repos you can access`.
 - NVIDIA CUDA is optional. The app can install CUDA-enabled PyTorch when an
   NVIDIA GPU is detected.
+- Overlapping-speech separation is optional and is enabled only when the app
+  detects a supported NVIDIA GPU and enough system and video memory.
 
 End users do not need to install Python manually. On first Start or Prepare, the
 app downloads the official Python 3.11.9 x64 embeddable runtime from python.org,
@@ -115,6 +117,34 @@ Important assumptions:
   ASR engine is not WhisperLiveKit.
 - Keep at least 30 GB free disk for one heavy setup and 50-80 GB if you install
   every optional ASR engine and model cache.
+
+### Two-speaker overlap separation
+
+The `Overlapping Speech` setting detects the CPU, logical processor count,
+system memory, NVIDIA GPU, and VRAM. `Auto recommendation` only lists models
+that satisfy the app's conservative memory policy. Unsupported selections are
+reset to Auto, and no separation package or checkpoint is installed when the
+machine cannot support the five-second target.
+
+| Model | App minimum | Streaming design | Multilingual flow | Selection status |
+| --- | --- | --- | --- | --- |
+| MossFormer2_SS_16K | NVIDIA CUDA, 10 GB VRAM, 16 GB RAM | 2-second windows with 250 ms continuity overlap | Language-independent waveform separation, then the selected multilingual ASR and translation provider | Preferred on higher-memory GPUs |
+| SepFormer WHAMR16k | NVIDIA CUDA, 6 GB VRAM, 16 GB RAM | 2-second windows with 250 ms continuity overlap | Language-independent waveform separation, then the selected multilingual ASR and translation provider | Lower-memory fallback |
+
+Both integrated models produce two 16 kHz speaker streams. Channel order is
+stabilized across windows before each stream is transcribed. When only one
+credible stem is present, the worker avoids duplicate captions. Separation is
+applied to system audio and replaces acoustic diarization for that capture;
+microphone input keeps its dedicated microphone label. WhisperLiveKit is not
+offered with separation because its stateful streaming ASR session cannot
+safely consume two independent streams.
+
+RE-SepFormer, SkiM, SepReformer, SR-CorrNet, and TF-GridNet are intentionally
+not exposed. The current app does not have a reproducible Windows Python 3.11,
+16 kHz checkpoint and maintained inference package path for those candidates.
+The five-second figure is an end-to-end design target, not a guarantee: actual
+latency still depends on the ASR model, translation provider, GPU load, and
+network response time.
 
 ### ASR-only minimums
 

@@ -18,7 +18,10 @@ public sealed record WorkerStartupState(
     bool QwenAsrAvailable,
     bool WhisperLiveKitAvailable,
     bool WhisperXAvailable,
-    bool HasHuggingFaceToken);
+    bool HasHuggingFaceToken,
+    SpeechSeparationModel SpeechSeparationModel = SpeechSeparationModel.None,
+    bool SpeechSeparationPackageAvailable = true,
+    bool SpeechSeparationModelPrepared = true);
 
 public enum StartupActionKind
 {
@@ -31,6 +34,7 @@ public enum StartupCapability
     Unavailable,
     NeedsHuggingFaceAccess,
     SttOnly,
+    SpeechSeparation,
     FullDiarization
 }
 
@@ -58,7 +62,8 @@ public static class WorkerStartupPlanner
         var missingPackages =
             (state.LocalWhisperRequested && !state.FasterWhisperAvailable) ||
             MissingDiarizationPackage(state) ||
-            MissingAsrEnginePackage(state);
+            MissingAsrEnginePackage(state) ||
+            MissingSpeechSeparationPackage(state);
 
         if (missingPackages)
         {
@@ -91,7 +96,11 @@ public static class WorkerStartupPlanner
 
         return new WorkerStartupPlan(
             actions,
-            state.DiarizationRequested ? StartupCapability.FullDiarization : StartupCapability.SttOnly,
+            state.SpeechSeparationModel != SpeechSeparationModel.None
+                ? StartupCapability.SpeechSeparation
+                : state.DiarizationRequested
+                    ? StartupCapability.FullDiarization
+                    : StartupCapability.SttOnly,
             null);
     }
 
@@ -129,11 +138,18 @@ public static class WorkerStartupPlanner
             (state.DiarizationModel == DiarizationModel.Diart && !state.DiartAvailable);
     }
 
+    private static bool MissingSpeechSeparationPackage(WorkerStartupState state)
+    {
+        return state.SpeechSeparationModel != SpeechSeparationModel.None &&
+            !state.SpeechSeparationPackageAvailable;
+    }
+
     private static bool NeedsModelPreparation(WorkerStartupState state, bool localDiarizationRequested)
     {
         return
             (state.LocalWhisperRequested && (!state.SttModelPrepared || !state.SttModelLoadable)) ||
-            (localDiarizationRequested && !state.DiarizationModelPrepared);
+            (localDiarizationRequested && !state.DiarizationModelPrepared) ||
+            (state.SpeechSeparationModel != SpeechSeparationModel.None && !state.SpeechSeparationModelPrepared);
     }
 
     private static bool UsesHuggingFaceDiarization(WorkerStartupState state)

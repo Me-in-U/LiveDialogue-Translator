@@ -28,16 +28,19 @@ public sealed class WorkerEnvironmentService
     public event EventHandler<WorkerSetupProgress>? ProgressChanged;
     public event EventHandler<WorkerLogLine>? LogReceived;
 
-    public async Task<WorkerStartupPlan> EnsureReadyAsync(AppSettings settings, CancellationToken token = default)
+    public async Task<WorkerStartupPlan> EnsureReadyAsync(
+        AppSettings settings,
+        SpeechSeparationModel effectiveSpeechSeparationModel,
+        CancellationToken token = default)
     {
         Report(L("CheckingLocalSpeechSetup"), L("CheckingPythonPackagesModels"), 0.05);
         await pythonRuntime.EnsureAsync(token, Report);
-        var state = await InspectAsync(settings, token);
+        var state = await InspectAsync(settings, effectiveSpeechSeparationModel, token);
         var plan = WorkerStartupPlanner.CreatePlan(state);
 
         // Fail before package/CUDA setup when gated model files must be
         // downloaded and the saved token cannot access the required repos.
-        if (RequiresHuggingFaceAccessBeforeSetup(settings, plan))
+        if (RequiresHuggingFaceAccessBeforeSetup(settings, effectiveSpeechSeparationModel, plan))
         {
             var earlyAccessError = await CheckHuggingFaceAccessAsync(settings, token);
             if (earlyAccessError != null)
@@ -56,8 +59,9 @@ public sealed class WorkerEnvironmentService
             {
                 case StartupActionKind.InstallPythonPackages:
                     await InstallPackagesAsync(token);
-                    await InstallOptionalDiarizationPackagesAsync(settings, token);
-                    await InstallAsrEnginePackagesAsync(settings, token);
+                    await InstallOptionalDiarizationPackagesAsync(settings, effectiveSpeechSeparationModel, token);
+                    await InstallAsrEnginePackagesAsync(settings, effectiveSpeechSeparationModel, token);
+                    await InstallSpeechSeparationPackagesAsync(effectiveSpeechSeparationModel, settings, token);
                     break;
             }
         }
@@ -69,7 +73,7 @@ public sealed class WorkerEnvironmentService
             switch (action.Kind)
             {
                 case StartupActionKind.PrepareModels:
-                    await PrepareModelsAsync(settings, token);
+                    await PrepareModelsAsync(settings, effectiveSpeechSeparationModel, token);
                     break;
             }
         }
@@ -86,20 +90,27 @@ public sealed class WorkerEnvironmentService
         return plan;
     }
 
-    public async Task RepairAsync(AppSettings settings, CancellationToken token = default)
+    public async Task RepairAsync(
+        AppSettings settings,
+        SpeechSeparationModel effectiveSpeechSeparationModel,
+        CancellationToken token = default)
     {
         Report(L("InstallingLocalSpeechPackages"), L("ReinstallingWorkerRequirements"), 0.1);
         await pythonRuntime.EnsureAsync(token, Report);
         await InstallPackagesAsync(token);
-        await InstallOptionalDiarizationPackagesAsync(settings, token);
-        await InstallAsrEnginePackagesAsync(settings, token);
+        await InstallOptionalDiarizationPackagesAsync(settings, effectiveSpeechSeparationModel, token);
+        await InstallAsrEnginePackagesAsync(settings, effectiveSpeechSeparationModel, token);
+        await InstallSpeechSeparationPackagesAsync(effectiveSpeechSeparationModel, settings, token);
         await EnsureCudaAccelerationAsync(settings, token);
         Report(L("PreparingLocalSpeechModels"), L("DownloadingOrValidatingModels"), 0.7);
-        await PrepareModelsAsync(settings, token);
+        await PrepareModelsAsync(settings, effectiveSpeechSeparationModel, token);
         Report(L("SpeechSetupReady"), L("WorkerRequirementsReady"), 1);
     }
 
-    private async Task<WorkerStartupState> InspectAsync(AppSettings settings, CancellationToken token)
+    private async Task<WorkerStartupState> InspectAsync(
+        AppSettings settings,
+        SpeechSeparationModel effectiveSpeechSeparationModel,
+        CancellationToken token)
     {
         if (!File.Exists(paths.WorkerScriptPath))
         {
@@ -114,7 +125,8 @@ public sealed class WorkerEnvironmentService
                 $"\"{paths.WorkerScriptPath}\" --check --models \"{paths.ModelDirectory}\"",
                 settings,
                 token,
-                progressTitle: L("CheckingPythonWorker"));
+                progressTitle: L("CheckingPythonWorker"),
+                speechSeparationModel: effectiveSpeechSeparationModel);
 
             if (result.ExitCode != 0)
             {
@@ -146,13 +158,16 @@ public sealed class WorkerEnvironmentService
                 DiarizationModelPrepared: root.TryGetProperty("diarizationModelPrepared", out var diarizationPrepared)
                     ? diarizationPrepared.GetBoolean()
                     : !settings.DiarizationEnabled || settings.DiarizationModel == DiarizationModel.Sortformer,
-                DiarizationRequested: settings.DiarizationEnabled,
+                DiarizationRequested: settings.DiarizationEnabled && effectiveSpeechSeparationModel == SpeechSeparationModel.None,
                 DiarizationModel: settings.DiarizationModel,
                 AsrEngine: settings.AsrEngine,
                 QwenAsrAvailable: root.TryGetProperty("qwenAsrAvailable", out var qwenAvailable) && qwenAvailable.GetBoolean(),
                 WhisperLiveKitAvailable: root.TryGetProperty("whisperLiveKitAvailable", out var whisperLiveKitAvailable) && whisperLiveKitAvailable.GetBoolean(),
                 WhisperXAvailable: root.TryGetProperty("whisperXAvailable", out var whisperXAvailable) && whisperXAvailable.GetBoolean(),
-                HasHuggingFaceToken: HasToken(settings));
+                HasHuggingFaceToken: HasToken(settings),
+                SpeechSeparationModel: effectiveSpeechSeparationModel,
+                SpeechSeparationPackageAvailable: root.TryGetProperty("speechSeparationAvailable", out var separationAvailable) && separationAvailable.GetBoolean(),
+                SpeechSeparationModelPrepared: root.TryGetProperty("speechSeparationModelPrepared", out var separationPrepared) && separationPrepared.GetBoolean());
         }
         catch (Exception ex)
         {
@@ -183,9 +198,12 @@ public sealed class WorkerEnvironmentService
         }
     }
 
-    private async Task InstallOptionalDiarizationPackagesAsync(AppSettings settings, CancellationToken token)
+    private async Task InstallOptionalDiarizationPackagesAsync(
+        AppSettings settings,
+        SpeechSeparationModel speechSeparationModel,
+        CancellationToken token)
     {
-        if (settings.DiarizationModel != DiarizationModel.Diart)
+        if (speechSeparationModel != SpeechSeparationModel.None || settings.DiarizationModel != DiarizationModel.Diart)
         {
             return;
         }
@@ -204,10 +222,16 @@ public sealed class WorkerEnvironmentService
         }
     }
 
-    private async Task InstallAsrEnginePackagesAsync(AppSettings settings, CancellationToken token)
+    private async Task InstallAsrEnginePackagesAsync(
+        AppSettings settings,
+        SpeechSeparationModel speechSeparationModel,
+        CancellationToken token)
     {
-        var engines = AsrEngineEnvironment.RequiredAsrEngines(settings.AsrEngine, settings.DiarizationModel);
-        if (RequiresSortformerPackages(settings))
+        var engines = AsrEngineEnvironment.RequiredAsrEngines(
+            settings.AsrEngine,
+            settings.DiarizationModel,
+            settings.DiarizationEnabled && speechSeparationModel == SpeechSeparationModel.None);
+        if (engines.Contains(AsrEngine.WhisperLiveKitSortformer))
         {
             Report(L("InstallingAsrEnginePackages"), L("AsrEnginePackagesCanTakeMinutes"), 0.34);
         }
@@ -242,9 +266,37 @@ public sealed class WorkerEnvironmentService
         }
     }
 
-    private static bool RequiresSortformerPackages(AppSettings settings)
+    private async Task InstallSpeechSeparationPackagesAsync(
+        SpeechSeparationModel model,
+        AppSettings settings,
+        CancellationToken token)
     {
-        return settings.DiarizationModel == DiarizationModel.Sortformer;
+        if (model is SpeechSeparationModel.None or SpeechSeparationModel.Auto)
+        {
+            return;
+        }
+
+        var requirementsPath = SpeechSeparationEnvironment.RequirementsPath(model);
+        if (!File.Exists(requirementsPath))
+        {
+            throw new InvalidOperationException($"Speech separation requirements file not found: {requirementsPath}");
+        }
+
+        var targetDirectory = paths.SpeechSeparationPackageDirectory(model);
+        Directory.CreateDirectory(targetDirectory);
+        Report(L("InstallingSpeechSeparationPackages"), L("SpeechSeparationPackagesCanTakeMinutes"), 0.4);
+        var result = await RunProcessAsync(
+            paths.PythonExecutablePath,
+            PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, targetDirectory),
+            settings,
+            token,
+            progressTitle: L("InstallingSpeechSeparationPackages"),
+            speechSeparationModel: model);
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"{L("PythonPackageInstallFailed")}{Environment.NewLine}{result.StdErr}{Environment.NewLine}{result.StdOut}");
+        }
     }
 
     private async Task EnsureCudaAccelerationAsync(AppSettings settings, CancellationToken token)
@@ -323,7 +375,10 @@ public sealed class WorkerEnvironmentService
         }
     }
 
-    private async Task PrepareModelsAsync(AppSettings settings, CancellationToken token)
+    private async Task PrepareModelsAsync(
+        AppSettings settings,
+        SpeechSeparationModel speechSeparationModel,
+        CancellationToken token)
     {
         Report(L("PreparingLocalSpeechModels"), L("DownloadingOrValidatingModels"), 0.65);
         var result = await RunProcessAsync(
@@ -331,7 +386,8 @@ public sealed class WorkerEnvironmentService
             $"\"{paths.WorkerScriptPath}\" --download --models \"{paths.ModelDirectory}\"",
             settings,
             token,
-            progressTitle: L("PreparingModels"));
+            progressTitle: L("PreparingModels"),
+            speechSeparationModel: speechSeparationModel);
 
         if (result.ExitCode != 0)
         {
@@ -369,7 +425,8 @@ public sealed class WorkerEnvironmentService
         string arguments,
         AppSettings? settings,
         CancellationToken token,
-        string progressTitle)
+        string progressTitle,
+        SpeechSeparationModel? speechSeparationModel = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -391,8 +448,22 @@ public sealed class WorkerEnvironmentService
         }
         if (settings != null)
         {
-            AsrEngineEnvironment.Apply(psi.Environment, paths, settings.AsrEngine, settings.DiarizationModel);
-            psi.Environment["LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_ENABLED"] = settings.DiarizationEnabled ? "true" : "false";
+            var effectiveDiarizationEnabled = settings.DiarizationEnabled &&
+                speechSeparationModel is null or SpeechSeparationModel.None;
+            AsrEngineEnvironment.Apply(
+                psi.Environment,
+                paths,
+                settings.AsrEngine,
+                settings.DiarizationModel,
+                effectiveDiarizationEnabled);
+            SpeechSeparationEnvironment.Apply(
+                psi.Environment,
+                paths,
+                speechSeparationModel ?? settings.SpeechSeparationModel);
+            psi.Environment["LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_ENABLED"] =
+                effectiveDiarizationEnabled
+                    ? "true"
+                    : "false";
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_MODEL"] = WorkerProtocol.FormatDiarizationModel(settings.DiarizationModel);
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = WorkerProtocol.FormatAsrEngine(settings.AsrEngine);
             psi.Environment["LIVE_DIALOGUE_TRANSLATOR_STT_QUALITY_PRESET"] = settings.SttQualityPreset.ToString();
@@ -443,11 +514,15 @@ public sealed class WorkerEnvironmentService
         return !string.IsNullOrWhiteSpace(settings.HuggingFaceToken);
     }
 
-    private static bool RequiresHuggingFaceAccessBeforeSetup(AppSettings settings, WorkerStartupPlan plan)
+    private static bool RequiresHuggingFaceAccessBeforeSetup(
+        AppSettings settings,
+        SpeechSeparationModel speechSeparationModel,
+        WorkerStartupPlan plan)
     {
         // A missing or invalid token should not block already-cached local
         // models; it only matters before work that may reach Hugging Face.
-        return DiarizationRequiresHuggingFaceAccess(settings) &&
+        return speechSeparationModel == SpeechSeparationModel.None &&
+            DiarizationRequiresHuggingFaceAccess(settings) &&
             (plan.Capability == StartupCapability.NeedsHuggingFaceAccess || NeedsModelPreparation(plan));
     }
 
@@ -511,7 +586,10 @@ public sealed class WorkerEnvironmentService
             QwenAsrAvailable: false,
             WhisperLiveKitAvailable: false,
             WhisperXAvailable: false,
-            HasHuggingFaceToken: HasToken(settings));
+            HasHuggingFaceToken: HasToken(settings),
+            SpeechSeparationModel: SpeechSeparationModel.None,
+            SpeechSeparationPackageAvailable: false,
+            SpeechSeparationModelPrepared: false);
     }
 
     private string DescribeCapability(StartupCapability capability)
@@ -519,6 +597,7 @@ public sealed class WorkerEnvironmentService
         return capability switch
         {
             StartupCapability.FullDiarization => L("SttDiarizationReady"),
+            StartupCapability.SpeechSeparation => L("SpeechSeparationReady"),
             StartupCapability.NeedsHuggingFaceAccess => L("LocalDiarizationNeedsAccess"),
             StartupCapability.SttOnly => L("SttOnlyReady"),
             _ => L("LocalSpeechUnavailable")

@@ -20,6 +20,7 @@ public sealed class AppPaths
         Directory.CreateDirectory(ModelDirectory);
         Directory.CreateDirectory(RuntimeDirectory);
         Directory.CreateDirectory(AsrRuntimeDirectory);
+        Directory.CreateDirectory(SpeechSeparationRuntimeDirectory);
         Directory.CreateDirectory(LogDirectory);
     }
 
@@ -29,6 +30,7 @@ public sealed class AppPaths
     public string PythonDirectory => PythonRuntimeLayout.PythonDirectory(RuntimeDirectory);
     public string PythonExecutablePath => PythonRuntimeLayout.PythonExecutablePath(RuntimeDirectory);
     public string AsrRuntimeDirectory => Path.Combine(RuntimeDirectory, "asr-engines");
+    public string SpeechSeparationRuntimeDirectory => Path.Combine(RuntimeDirectory, "speech-separation");
     public string LogDirectory { get; }
     public string SettingsPath { get; }
 
@@ -38,6 +40,21 @@ public sealed class AppPaths
     public string AsrPackageDirectory(AsrEngine engine)
     {
         return Path.Combine(AsrRuntimeDirectory, AsrEngineSlug(engine), "site");
+    }
+
+    public string SpeechSeparationPackageDirectory(SpeechSeparationModel model)
+    {
+        return Path.Combine(SpeechSeparationRuntimeDirectory, SpeechSeparationModelSlug(model), "site");
+    }
+
+    public static string SpeechSeparationModelSlug(SpeechSeparationModel model)
+    {
+        return model switch
+        {
+            SpeechSeparationModel.MossFormer2 => "mossformer2-ss-16k",
+            SpeechSeparationModel.SepFormerWhamr16k => "sepformer-whamr16k",
+            _ => "none"
+        };
     }
 
     public static string AsrEngineSlug(AsrEngine engine)

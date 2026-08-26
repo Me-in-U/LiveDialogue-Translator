@@ -9,10 +9,11 @@ public static class AsrEngineEnvironment
         IDictionary<string, string?> environment,
         AppPaths paths,
         AsrEngine engine,
-        DiarizationModel diarizationModel = DiarizationModel.PyannoteCommunity)
+        DiarizationModel diarizationModel = DiarizationModel.PyannoteCommunity,
+        bool diarizationEnabled = true)
     {
         ApplyEnvFile(environment, ResolveEnvPath(engine));
-        foreach (var requiredEngine in RequiredAsrEngines(engine, diarizationModel))
+        foreach (var requiredEngine in RequiredAsrEngines(engine, diarizationModel, diarizationEnabled))
         {
             if (requiredEngine == engine)
             {
@@ -24,7 +25,7 @@ public static class AsrEngineEnvironment
 
         environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = WorkerProtocol.FormatAsrEngine(engine);
 
-        var packageDirectories = OrderAsrPackageEngines(RequiredAsrEngines(engine, diarizationModel))
+        var packageDirectories = OrderAsrPackageEngines(RequiredAsrEngines(engine, diarizationModel, diarizationEnabled))
             .Select(paths.AsrPackageDirectory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -36,7 +37,10 @@ public static class AsrEngineEnvironment
         environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE_SITE"] = string.Join(Path.PathSeparator, packageDirectories);
     }
 
-    public static IReadOnlyList<AsrEngine> RequiredAsrEngines(AsrEngine engine, DiarizationModel diarizationModel)
+    public static IReadOnlyList<AsrEngine> RequiredAsrEngines(
+        AsrEngine engine,
+        DiarizationModel diarizationModel,
+        bool diarizationEnabled = true)
     {
         var engines = new List<AsrEngine>();
         if (engine != AsrEngine.None)
@@ -44,7 +48,7 @@ public static class AsrEngineEnvironment
             engines.Add(engine);
         }
 
-        if (diarizationModel == DiarizationModel.Sortformer && !engines.Contains(AsrEngine.WhisperLiveKitSortformer))
+        if (diarizationEnabled && diarizationModel == DiarizationModel.Sortformer && !engines.Contains(AsrEngine.WhisperLiveKitSortformer))
         {
             engines.Add(AsrEngine.WhisperLiveKitSortformer);
         }

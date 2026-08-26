@@ -54,7 +54,13 @@ public sealed class WorkerClient : IDisposable
             StandardErrorEncoding = Utf8NoBom
         };
         PythonProcessEnvironment.Apply(psi.Environment);
-        AsrEngineEnvironment.Apply(psi.Environment, paths, configuration.AsrEngine, configuration.DiarizationModel);
+        AsrEngineEnvironment.Apply(
+            psi.Environment,
+            paths,
+            configuration.AsrEngine,
+            configuration.DiarizationModel,
+            configuration.DiarizationEnabled);
+        SpeechSeparationEnvironment.Apply(psi.Environment, paths, configuration.SpeechSeparationModel);
         if (!string.IsNullOrWhiteSpace(huggingFaceToken))
         {
             psi.Environment["HF_TOKEN"] = huggingFaceToken;

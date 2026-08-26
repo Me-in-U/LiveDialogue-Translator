@@ -15,6 +15,7 @@ using LiveDialogueTranslator.App.Models;
 using LiveDialogueTranslator.App.Services;
 using LiveDialogueTranslator.App.ViewModels;
 using LiveDialogueTranslator.Core.Protocol;
+using LiveDialogueTranslator.Core.Runtime;
 using LiveDialogueTranslator.Core.Speakers;
 using LiveDialogueTranslator.Core.Startup;
 using LiveDialogueTranslator.Core.Transcripts;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window
     private readonly AudioCaptureService audioCapture = new();
     private readonly WorkerClient workerClient;
     private readonly WorkerEnvironmentService workerEnvironment;
+    private readonly HardwareDetectionService hardwareDetection = new();
     private readonly TranslationService translationService = new();
     private readonly SpeakerSegmentTimeline speakerTimeline = new();
     private readonly DispatcherTimer captionInactivityTimer;
@@ -72,6 +74,12 @@ public partial class MainWindow : Window
     private bool closingApp;
     private string pythonConsoleModelKey = string.Empty;
     private DateTime lastCaptionActiveSpeakerUpdateUtc = DateTime.MinValue;
+    private HardwareProfile hardwareProfile = HardwareProfile.Unknown;
+    private SpeechSeparationRecommendation speechSeparationRecommendation = new(
+        SpeechSeparationModel.None,
+        [],
+        "Hardware detection has not completed.");
+    private bool hardwareDetectionComplete;
 
     public MainWindow()
     {
@@ -200,6 +208,9 @@ public partial class MainWindow : Window
         SttPresetTalkShowRadio.Content = L("Stable");
         ComputeLabel.Text = L("Compute");
         ComputeAutoItem.Content = L("Auto");
+        SpeechSeparationLabel.Text = L("SpeechSeparation");
+        RedetectHardwareButton.Content = L("DetectHardwareAgain");
+        HardwareSummaryText.Text = L("DetectingHardware");
         ModelManagerLabel.Text = L("ModelManager");
         ModelManagerButton.Content = L("Open");
         DebugLabel.Text = L("Debug");
@@ -277,6 +288,7 @@ public partial class MainWindow : Window
         InfoReferenceLabelRun.Text = $"{L("ReferenceProject")}:";
         InfoAsrLabelRun.Text = $"{L("SupportedAsrBackends")}:";
         InfoDiarizationLabelRun.Text = $"{L("SupportedDiarizationBackends")}:";
+        InfoSpeechSeparationLabelRun.Text = $"{L("SupportedSpeechSeparationBackends")}:";
         InfoLicenseLabelRun.Text = $"{L("License")}:";
         InfoRuntimeTitle.Text = L("Runtime");
         InfoVersionLabelRun.Text = $"{L("Version")}: ";
@@ -329,6 +341,9 @@ public partial class MainWindow : Window
     private async Task StartCaptureAsync(bool showCaptionsPage = true)
     {
         SaveSettingsFromUi();
+        await EnsureHardwareRecommendationAsync();
+        SaveSettingsFromUi();
+        var effectiveSpeechSeparationModel = EffectiveSpeechSeparationModel();
         speakerNames = BuildSpeakerNameMap();
         merger = new CaptionMerger(MaxRetainedDisplayLines(), speakerNames);
         speakerTimeline.Clear();
@@ -352,7 +367,7 @@ public partial class MainWindow : Window
         WorkerStartupPlan startupPlan;
         try
         {
-            startupPlan = await workerEnvironment.EnsureReadyAsync(settings);
+            startupPlan = await workerEnvironment.EnsureReadyAsync(settings, effectiveSpeechSeparationModel);
         }
         catch (Exception ex)
         {
@@ -389,7 +404,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var workerConfiguration = settingsStore.ToWorkerConfiguration(settings);
+        var workerConfiguration = settingsStore.ToWorkerConfiguration(settings, effectiveSpeechSeparationModel);
         if (startupPlan.Capability == StartupCapability.SttOnly)
         {
             workerConfiguration = workerConfiguration with { DiarizationEnabled = false };
@@ -561,7 +576,8 @@ public partial class MainWindow : Window
             settings.AsrEngine,
             (settings.SttModel ?? string.Empty).Trim(),
             settings.DiarizationEnabled,
-            settings.DiarizationModel);
+            settings.DiarizationModel,
+            settings.SpeechSeparationModel);
     }
 
     private bool IsConsoleScrolledToBottom()
@@ -1152,7 +1168,16 @@ public partial class MainWindow : Window
 
     private void RestartSetting_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (suppressSettingsChange)
+        {
+            return;
+        }
+
         ApplyAsrEngineUiState(normalizeSelection: true);
+        if (sender == ComputeModeBox || sender == AsrEngineBox || sender == SttModelBox || sender == SpeechSeparationModelBox)
+        {
+            UpdateSpeechSeparationRecommendation(normalizeSelection: true);
+        }
         UpdateDiartManualControls();
         UpdateSttPresetSummary();
         _ = QueueSettingsApplyAsync(restartIfRunning: true);
@@ -1225,12 +1250,159 @@ public partial class MainWindow : Window
         CloseOverlay(rememberClosed: true);
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        await EnsureHardwareRecommendationAsync();
         if (settings.OverlayOpen)
         {
             ShowOverlay(rememberOpen: false);
         }
+    }
+
+    private async void RedetectHardwareButton_Click(object sender, RoutedEventArgs e)
+    {
+        await EnsureHardwareRecommendationAsync(force: true);
+        SaveSettingsFromUi();
+        AdjustWindowHeightToSettingsContent();
+    }
+
+    private async Task EnsureHardwareRecommendationAsync(bool force = false)
+    {
+        if (hardwareDetectionComplete && !force)
+        {
+            UpdateSpeechSeparationRecommendation(normalizeSelection: true);
+            return;
+        }
+
+        RedetectHardwareButton.IsEnabled = false;
+        HardwareSummaryText.Text = L("DetectingHardware");
+        try
+        {
+            hardwareProfile = await hardwareDetection.DetectAsync();
+            hardwareDetectionComplete = true;
+            UpdateSpeechSeparationRecommendation(normalizeSelection: true);
+        }
+        finally
+        {
+            RedetectHardwareButton.IsEnabled = true;
+        }
+    }
+
+    private void UpdateSpeechSeparationRecommendation(bool normalizeSelection)
+    {
+        if (!hardwareDetectionComplete)
+        {
+            HardwareSummaryText.Text = L("DetectingHardware");
+            return;
+        }
+
+        var computeMode = ParseSelectedTag(ComputeModeBox, settings.ComputeMode);
+        var asrEngine = ParseSelectedTag(AsrEngineBox, settings.AsrEngine);
+        var sttModel = SelectedContent(SttModelBox, settings.SttModel);
+        var requested = ParseSelectedTag(SpeechSeparationModelBox, settings.SpeechSeparationModel);
+        speechSeparationRecommendation = SpeechSeparationAdvisor.Recommend(
+            hardwareProfile,
+            computeMode,
+            asrEngine,
+            sttModel);
+
+        if (normalizeSelection &&
+            requested is not SpeechSeparationModel.Auto and not SpeechSeparationModel.None &&
+            !speechSeparationRecommendation.SupportedModels.Contains(requested))
+        {
+            requested = SpeechSeparationModel.Auto;
+        }
+
+        PopulateSpeechSeparationModelItems(requested);
+        var gpu = hardwareProfile.HasNvidiaGpu
+            ? LF("HardwareGpuSummary", hardwareProfile.GpuName ?? "NVIDIA GPU", hardwareProfile.GpuMemoryGiB)
+            : L("HardwareNoSupportedGpu");
+        HardwareSummaryText.Text = LF(
+            "HardwareSummary",
+            hardwareProfile.CpuName,
+            hardwareProfile.LogicalProcessorCount,
+            hardwareProfile.MemoryGiB,
+            gpu);
+
+        if (speechSeparationRecommendation.IsAvailable)
+        {
+            SpeechSeparationRecommendationText.Text = LF(
+                "SpeechSeparationRecommended",
+                SpeechSeparationAdvisor.DisplayName(speechSeparationRecommendation.Model),
+                LocalizedSpeechSeparationReason(computeMode, asrEngine));
+        }
+        else
+        {
+            SpeechSeparationRecommendationText.Text = LF(
+                "SpeechSeparationUnavailable",
+                LocalizedSpeechSeparationReason(computeMode, asrEngine));
+        }
+    }
+
+    private void PopulateSpeechSeparationModelItems(SpeechSeparationModel requested)
+    {
+        var previousSuppression = suppressSettingsChange;
+        suppressSettingsChange = true;
+        try
+        {
+            SpeechSeparationModelBox.Items.Clear();
+            AddSpeechSeparationItem(L("SpeechSeparationAuto"), SpeechSeparationModel.Auto);
+            AddSpeechSeparationItem(L("SpeechSeparationOff"), SpeechSeparationModel.None);
+            foreach (var model in speechSeparationRecommendation.SupportedModels)
+            {
+                AddSpeechSeparationItem(SpeechSeparationAdvisor.DisplayName(model), model);
+            }
+
+            var selectable = requested is SpeechSeparationModel.Auto or SpeechSeparationModel.None ||
+                speechSeparationRecommendation.SupportedModels.Contains(requested);
+            SelectByTag(
+                SpeechSeparationModelBox,
+                (selectable ? requested : SpeechSeparationModel.Auto).ToString());
+        }
+        finally
+        {
+            suppressSettingsChange = previousSuppression;
+        }
+    }
+
+    private void AddSpeechSeparationItem(string content, SpeechSeparationModel model)
+    {
+        SpeechSeparationModelBox.Items.Add(new ComboBoxItem
+        {
+            Content = content,
+            Tag = model.ToString()
+        });
+    }
+
+    private string LocalizedSpeechSeparationReason(ComputeMode computeMode, AsrEngine asrEngine)
+    {
+        if (computeMode == ComputeMode.Cpu)
+        {
+            return L("SpeechSeparationReasonCpu");
+        }
+
+        if (asrEngine == AsrEngine.WhisperLiveKitSortformer)
+        {
+            return L("SpeechSeparationReasonStreamingAsr");
+        }
+
+        if (!hardwareProfile.HasNvidiaGpu)
+        {
+            return L("SpeechSeparationReasonNoGpu");
+        }
+
+        return speechSeparationRecommendation.Model == SpeechSeparationModel.MossFormer2
+            ? L("SpeechSeparationReasonMoss")
+            : speechSeparationRecommendation.Model == SpeechSeparationModel.SepFormerWhamr16k
+                ? L("SpeechSeparationReasonSepFormer")
+                : L("SpeechSeparationReasonMemory");
+    }
+
+    private SpeechSeparationModel EffectiveSpeechSeparationModel()
+    {
+        return SpeechSeparationAdvisor.Resolve(
+            settings.SpeechSeparationModel,
+            speechSeparationRecommendation);
     }
 
     private void ShowOverlay(bool rememberOpen)
@@ -1441,6 +1613,7 @@ public partial class MainWindow : Window
             SelectDiarizationPreset(settings.DiarizationQualityPreset);
             OverlayOpacitySlider.Value = Math.Clamp(settings.Overlay.Opacity * 100.0, 0.0, 100.0);
             SelectByTag(ComputeModeBox, settings.ComputeMode.ToString());
+            PopulateSpeechSeparationModelItems(settings.SpeechSeparationModel);
             SelectByTag(TranslateProviderBox, settings.TranslateProvider.ToString());
             SelectByTag(TargetLanguageBox, settings.TargetLanguage);
             SelectCaptionDisplayMode(settings.CaptionDisplayMode);
@@ -1482,6 +1655,9 @@ public partial class MainWindow : Window
         settings.SttQualityPreset = SelectedSttQualityPreset();
         settings.DiarizationQualityPreset = SelectedDiarizationQualityPreset();
         settings.ComputeMode = ParseSelectedTag(ComputeModeBox, settings.ComputeMode);
+        settings.SpeechSeparationModel = ParseSelectedTag(
+            SpeechSeparationModelBox,
+            settings.SpeechSeparationModel);
         settings.TranslateProvider = ParseSelectedTag(TranslateProviderBox, settings.TranslateProvider);
         settings.TargetLanguage = ParseSelectedTag(TargetLanguageBox, settings.TargetLanguage);
         settings.CaptionDisplayMode = SelectedCaptionDisplayMode();
@@ -2223,12 +2399,15 @@ public partial class MainWindow : Window
         try
         {
             SaveSettingsFromUi();
+            await EnsureHardwareRecommendationAsync();
+            SaveSettingsFromUi();
+            var effectiveSpeechSeparationModel = EffectiveSpeechSeparationModel();
             lastSttUnavailableMessage = null;
             await StopCaptureAsync(showStopped: false);
             CurrentSpeakerText.Text = L("Original");
             SetCurrentCaptionText(L("InstallWorkerTitle"), "");
             ShowSetupProgress(L("InstallWorkerTitle"), L("InstallWorkerCaption"), null);
-            await workerEnvironment.RepairAsync(settings);
+            await workerEnvironment.RepairAsync(settings, effectiveSpeechSeparationModel);
             HideSetupProgressIfReady();
 
             if (restartCapture)
@@ -2294,7 +2473,12 @@ public partial class MainWindow : Window
     private bool OpenModelManager(bool showAccessNotice)
     {
         SaveSettingsFromUi();
-        var window = new ModelManagerWindow(paths, settings, localizer, showAccessNotice)
+        var window = new ModelManagerWindow(
+            paths,
+            settings,
+            localizer,
+            EffectiveSpeechSeparationModel(),
+            showAccessNotice)
         {
             Owner = this
         };
@@ -2351,6 +2535,16 @@ public partial class MainWindow : Window
     private void SortformerLink_Click(object sender, RoutedEventArgs e)
     {
         OpenExternalLink(ProjectLinks.SortformerUrl);
+    }
+
+    private void MossFormer2Link_Click(object sender, RoutedEventArgs e)
+    {
+        OpenExternalLink(ProjectLinks.MossFormer2Url);
+    }
+
+    private void SepFormerLink_Click(object sender, RoutedEventArgs e)
+    {
+        OpenExternalLink(ProjectLinks.SepFormerUrl);
     }
 
     private void LicenseLink_Click(object sender, RoutedEventArgs e)

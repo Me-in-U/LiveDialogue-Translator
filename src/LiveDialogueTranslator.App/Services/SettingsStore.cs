@@ -53,7 +53,9 @@ public sealed class SettingsStore
         File.WriteAllText(path, JsonSerializer.Serialize(settings, JsonOptions));
     }
 
-    public WorkerConfiguration ToWorkerConfiguration(AppSettings settings)
+    public WorkerConfiguration ToWorkerConfiguration(
+        AppSettings settings,
+        SpeechSeparationModel? effectiveSpeechSeparationModel = null)
     {
         var exactSpeakers = settings.SpeakerCountMode == SpeakerCountMode.Exact
             ? Math.Max(1, settings.ExactSpeakers ?? settings.MaxSpeakers)
@@ -65,7 +67,8 @@ public sealed class SettingsStore
             settings.SttLanguages,
             settings.SttQualityPreset,
             settings.ComputeMode,
-            settings.DiarizationEnabled,
+            settings.DiarizationEnabled &&
+                (effectiveSpeechSeparationModel ?? settings.SpeechSeparationModel) == SpeechSeparationModel.None,
             settings.DiarizationModel,
             maxSpeakers,
             exactSpeakers,
@@ -80,7 +83,8 @@ public sealed class SettingsStore
             settings.DiartDeltaNew,
             DiarizationQualityPreset: settings.DiarizationQualityPreset,
             AsrEngine: settings.AsrEngine,
-            SpeakerCountMode: settings.SpeakerCountMode);
+            SpeakerCountMode: settings.SpeakerCountMode,
+            SpeechSeparationModel: effectiveSpeechSeparationModel ?? settings.SpeechSeparationModel);
     }
 
     private static void NormalizeSettings(AppSettings settings)
@@ -90,6 +94,10 @@ public sealed class SettingsStore
         if (!Enum.IsDefined(settings.SpeakerCountMode))
         {
             settings.SpeakerCountMode = SpeakerCountMode.ActiveMax;
+        }
+        if (!Enum.IsDefined(settings.SpeechSeparationModel))
+        {
+            settings.SpeechSeparationModel = SpeechSeparationModel.Auto;
         }
         if (settings.ExactSpeakers is > 0)
         {

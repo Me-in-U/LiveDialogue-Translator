@@ -13,6 +13,7 @@ var tests = new (string Name, Action Body)[]
     ("worker protocol serializes speaker count mode", WorkerProtocolSerializesSpeakerCountMode),
     ("worker protocol serializes diarization model", WorkerProtocolSerializesDiarizationModel),
     ("worker protocol serializes ASR engine", WorkerProtocolSerializesAsrEngine),
+    ("worker protocol serializes speech separation model", WorkerProtocolSerializesSpeechSeparationModel),
     ("worker protocol serializes manual diart tuning", WorkerProtocolSerializesManualDiartTuning),
     ("worker protocol parses final captions with speaker and latency", WorkerProtocolParsesFinalCaption),
     ("speaker names prefer manual rename over generated label", SpeakerNamesPreferManualRename),
@@ -125,6 +126,11 @@ var tests = new (string Name, Action Body)[]
     ("startup planner requests hugging face access before local diarization", StartupPlannerRequestsHuggingFaceAccessBeforeLocalDiarization),
     ("worker environment checks hf access before setup when models need download", WorkerEnvironmentChecksHfAccessBeforeSetupWhenModelsNeedDownload),
     ("startup planner installs selected ASR engine packages", StartupPlannerInstallsSelectedAsrEnginePackages),
+    ("speech separation advisor recommends models by detected hardware", SpeechSeparationAdvisorRecommendsModelsByHardware),
+    ("speech separation advisor rejects unsupported runtime paths", SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths),
+    ("startup planner installs and prepares selected separation model", StartupPlannerInstallsAndPreparesSpeechSeparation),
+    ("main window exposes automatic hardware based separation selection", MainWindowExposesAutomaticHardwareBasedSpeechSeparation),
+    ("speech separation requirements only expose integrated models", SpeechSeparationRequirementsOnlyExposeIntegratedModels),
 };
 
 var failed = 0;
@@ -259,6 +265,25 @@ static void WorkerProtocolSerializesDiarizationModel()
 
     Assert.Contains("\"diarizationModel\":\"sortformer\"", WorkerProtocol.Serialize(sortformerCommand));
 
+}
+
+static void WorkerProtocolSerializesSpeechSeparationModel()
+{
+    var command = WorkerProtocol.Configure(new WorkerConfiguration(
+        InputMode.SystemAudioOnly,
+        "large-v3-turbo",
+        new[] { "ko", "en" },
+        50,
+        ComputeMode.Cuda,
+        false,
+        DiarizationModel.PyannoteCommunity,
+        2,
+        null,
+        true,
+        new Dictionary<string, string>(),
+        SpeechSeparationModel: SpeechSeparationModel.MossFormer2));
+
+    Assert.Contains("\"speechSeparationModel\":\"mossformer2_ss_16k\"", WorkerProtocol.Serialize(command));
 }
 
 static void WorkerProtocolSerializesAsrEngine()
@@ -597,6 +622,8 @@ static void ProjectLinksExposeAllSpeechBackendPages()
     Assert.Equal("https://github.com/m-bain/whisperX", ProjectLinks.WhisperXUrl);
     Assert.Equal("https://github.com/juanmc2005/diart", ProjectLinks.DiartUrl);
     Assert.Equal("https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2", ProjectLinks.SortformerUrl);
+    Assert.Equal("https://huggingface.co/alibabasglab/MossFormer2_SS_16K", ProjectLinks.MossFormer2Url);
+    Assert.Equal("https://huggingface.co/speechbrain/sepformer-whamr16k", ProjectLinks.SepFormerUrl);
 }
 
 static void InstallerShowsApacheLicense()
@@ -657,6 +684,7 @@ static void MainWindowInfoPageListsAllSpeechBackends()
 
     Assert.Contains("InfoAsrLabelRun", xaml);
     Assert.Contains("InfoDiarizationLabelRun", xaml);
+    Assert.Contains("InfoSpeechSeparationLabelRun", xaml);
     Assert.Contains("FasterWhisperLink_Click", xaml);
     Assert.Contains("QwenAsrLink_Click", xaml);
     Assert.Contains("WhisperLiveKitLink_Click", xaml);
@@ -664,19 +692,26 @@ static void MainWindowInfoPageListsAllSpeechBackends()
     Assert.Contains("PyannoteLink_Click", xaml);
     Assert.Contains("DiartLink_Click", xaml);
     Assert.Contains("SortformerLink_Click", xaml);
+    Assert.Contains("MossFormer2Link_Click", xaml);
+    Assert.Contains("SepFormerLink_Click", xaml);
     Assert.Contains("OpenExternalLink(ProjectLinks.QwenAsrUrl)", source);
     Assert.Contains("OpenExternalLink(ProjectLinks.WhisperLiveKitUrl)", source);
     Assert.Contains("OpenExternalLink(ProjectLinks.WhisperXUrl)", source);
     Assert.Contains("OpenExternalLink(ProjectLinks.DiartUrl)", source);
     Assert.Contains("OpenExternalLink(ProjectLinks.SortformerUrl)", source);
+    Assert.Contains("OpenExternalLink(ProjectLinks.MossFormer2Url)", source);
+    Assert.Contains("OpenExternalLink(ProjectLinks.SepFormerUrl)", source);
     Assert.Contains("[\"SupportedAsrBackends\"]", localizer);
     Assert.Contains("[\"SupportedDiarizationBackends\"]", localizer);
+    Assert.Contains("[\"SupportedSpeechSeparationBackends\"]", localizer);
     Assert.True(!localizer.Contains("(\"DIART (Diarization Model)\"", StringComparison.Ordinal), "Diarization group title must not imply Diart is the only diarization backend.");
     Assert.Contains("Qwen3-ASR", readme);
     Assert.Contains("WhisperLiveKit", readme);
     Assert.Contains("WhisperX", readme);
     Assert.Contains("Diart", readme);
     Assert.Contains("Sortformer", readme);
+    Assert.Contains("MossFormer2_SS_16K", readme);
+    Assert.Contains("SepFormer WHAMR16k", readme);
 }
 
 static void HuggingFaceTokenGuidanceNamesRequiredPermission()
@@ -1939,7 +1974,7 @@ static void OverlayOpenStateRestoresOnStartup()
 
     Assert.Contains("public bool OverlayOpen", settingsSource);
     Assert.Contains("Loaded += MainWindow_Loaded;", mainSource);
-    Assert.Contains("private void MainWindow_Loaded(object sender, RoutedEventArgs e)", mainSource);
+    Assert.Contains("private async void MainWindow_Loaded(object sender, RoutedEventArgs e)", mainSource);
     Assert.Contains("if (settings.OverlayOpen)", mainSource);
     Assert.Contains("ShowOverlay(rememberOpen: false);", mainSource);
     Assert.Contains("ShowOverlay(rememberOpen: true);", mainSource);
@@ -2019,7 +2054,8 @@ static void WorkerEnvironmentSkipsLocalDiarizationPackageInstallsForWhisperLiveK
     var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "WorkerEnvironmentService.cs"));
 
     Assert.Contains("settings.DiarizationModel != DiarizationModel.Diart", source);
-    Assert.Contains("RequiresSortformerPackages(settings)", source);
+    Assert.Contains("speechSeparationModel != SpeechSeparationModel.None", source);
+    Assert.Contains("engines.Contains(AsrEngine.WhisperLiveKitSortformer)", source);
 }
 
 static void SetupActionHintsExposeInstallActionForMockMode()
@@ -2160,13 +2196,13 @@ static void WorkerEnvironmentChecksHfAccessBeforeSetupWhenModelsNeedDownload()
     var accessCheck = environment.IndexOf("var earlyAccessError = await CheckHuggingFaceAccessAsync(settings, token);", StringComparison.Ordinal);
     var packageInstall = environment.IndexOf("await InstallPackagesAsync(token);", StringComparison.Ordinal);
     var cudaInstall = environment.IndexOf("await EnsureCudaAccelerationAsync(settings, token);", StringComparison.Ordinal);
-    var modelPrepare = environment.IndexOf("await PrepareModelsAsync(settings, token);", StringComparison.Ordinal);
+    var modelPrepare = environment.IndexOf("await PrepareModelsAsync(settings, effectiveSpeechSeparationModel, token);", StringComparison.Ordinal);
 
     Assert.True(accessCheck >= 0, "HF access must be checked before setup when missing models require gated downloads.");
     Assert.True(packageInstall > accessCheck, "HF access check must happen before package installation.");
     Assert.True(cudaInstall > accessCheck, "HF access check must happen before CUDA setup.");
     Assert.True(modelPrepare > accessCheck, "HF access check must happen before model preparation.");
-    Assert.Contains("RequiresHuggingFaceAccessBeforeSetup(settings, plan)", environment);
+    Assert.Contains("RequiresHuggingFaceAccessBeforeSetup(settings, effectiveSpeechSeparationModel, plan)", environment);
     Assert.Contains("NeedsModelPreparation(plan)", environment);
     Assert.Contains("RequiredHuggingFaceModelIds(settings.DiarizationModel)", environment);
 }
@@ -2212,6 +2248,110 @@ static void StartupPlannerInstallsSelectedAsrEnginePackages()
         HasHuggingFaceToken: false));
 
     Assert.Equal(StartupActionKind.InstallPythonPackages, whisperXPlan.Actions[0].Kind);
+}
+
+static void SpeechSeparationAdvisorRecommendsModelsByHardware()
+{
+    var highMemory = new HardwareProfile(
+        "CPU",
+        16,
+        32 * SpeechSeparationAdvisor.GiB,
+        "NVIDIA GeForce RTX",
+        12 * SpeechSeparationAdvisor.GiB,
+        true);
+    var lowerMemory = highMemory with { GpuMemoryBytes = 8 * SpeechSeparationAdvisor.GiB };
+
+    var highRecommendation = SpeechSeparationAdvisor.Recommend(highMemory, ComputeMode.Auto, AsrEngine.None);
+    var lowerRecommendation = SpeechSeparationAdvisor.Recommend(lowerMemory, ComputeMode.Cuda, AsrEngine.WhisperX);
+    var qwenHeavyRecommendation = SpeechSeparationAdvisor.Recommend(
+        highMemory,
+        ComputeMode.Cuda,
+        AsrEngine.Qwen3Asr,
+        "qwen3-asr-1.7b");
+
+    Assert.Equal(SpeechSeparationModel.MossFormer2, highRecommendation.Model);
+    Assert.Equal(2, highRecommendation.SupportedModels.Count);
+    Assert.Equal(SpeechSeparationModel.SepFormerWhamr16k, lowerRecommendation.Model);
+    Assert.Equal(1, lowerRecommendation.SupportedModels.Count);
+    Assert.Equal(SpeechSeparationModel.None, qwenHeavyRecommendation.Model);
+}
+
+static void SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths()
+{
+    var profile = new HardwareProfile(
+        "CPU",
+        16,
+        32 * SpeechSeparationAdvisor.GiB,
+        "NVIDIA GeForce RTX",
+        12 * SpeechSeparationAdvisor.GiB,
+        true);
+    var cpu = SpeechSeparationAdvisor.Recommend(profile, ComputeMode.Cpu, AsrEngine.None);
+    var streaming = SpeechSeparationAdvisor.Recommend(profile, ComputeMode.Cuda, AsrEngine.WhisperLiveKitSortformer);
+    var noGpu = SpeechSeparationAdvisor.Recommend(profile with { GpuName = null, NvidiaDriverAvailable = false }, ComputeMode.Auto, AsrEngine.None);
+
+    Assert.Equal(SpeechSeparationModel.None, cpu.Model);
+    Assert.Equal(SpeechSeparationModel.None, streaming.Model);
+    Assert.Equal(SpeechSeparationModel.None, noGpu.Model);
+    Assert.Equal(SpeechSeparationModel.None, SpeechSeparationAdvisor.Resolve(SpeechSeparationModel.MossFormer2, noGpu));
+}
+
+static void StartupPlannerInstallsAndPreparesSpeechSeparation()
+{
+    var plan = WorkerStartupPlanner.CreatePlan(new WorkerStartupState(
+        PythonAvailable: true,
+        LocalWhisperRequested: true,
+        FasterWhisperAvailable: true,
+        PyannoteAvailable: true,
+        DiartAvailable: true,
+        TorchAvailable: true,
+        SttModelPrepared: true,
+        SttModelLoadable: true,
+        DiarizationModelPrepared: true,
+        DiarizationRequested: false,
+        DiarizationModel: DiarizationModel.PyannoteCommunity,
+        AsrEngine: AsrEngine.None,
+        QwenAsrAvailable: true,
+        WhisperLiveKitAvailable: true,
+        WhisperXAvailable: true,
+        HasHuggingFaceToken: false,
+        SpeechSeparationModel: SpeechSeparationModel.MossFormer2,
+        SpeechSeparationPackageAvailable: false,
+        SpeechSeparationModelPrepared: false));
+
+    Assert.Equal(2, plan.Actions.Count);
+    Assert.Equal(StartupActionKind.InstallPythonPackages, plan.Actions[0].Kind);
+    Assert.Equal(StartupActionKind.PrepareModels, plan.Actions[1].Kind);
+    Assert.Equal(StartupCapability.SpeechSeparation, plan.Capability);
+}
+
+static void MainWindowExposesAutomaticHardwareBasedSpeechSeparation()
+{
+    var xaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml"));
+    var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
+    var detector = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "HardwareDetectionService.cs"));
+
+    Assert.Contains("x:Name=\"SpeechSeparationModelBox\"", xaml);
+    Assert.Contains("x:Name=\"HardwareSummaryText\"", xaml);
+    Assert.Contains("x:Name=\"RedetectHardwareButton\"", xaml);
+    Assert.Contains("await hardwareDetection.DetectAsync()", source);
+    Assert.Contains("SpeechSeparationAdvisor.Recommend", source);
+    Assert.Contains("sender == SttModelBox", source);
+    Assert.Contains("nvidia-smi", detector);
+    Assert.Contains("GlobalMemoryStatusEx", detector);
+}
+
+static void SpeechSeparationRequirementsOnlyExposeIntegratedModels()
+{
+    var moss = File.ReadAllText(Path.Combine("worker", "requirements-speech-separation-mossformer2.txt"));
+    var sep = File.ReadAllText(Path.Combine("worker", "requirements-speech-separation-sepformer.txt"));
+    var environment = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "SpeechSeparationEnvironment.cs"));
+
+    Assert.Contains("clearvoice==0.1.2", moss);
+    Assert.Contains("speechbrain==1.0.3", sep);
+    Assert.Contains("requirements-speech-separation-mossformer2.txt", environment);
+    Assert.Contains("requirements-speech-separation-sepformer.txt", environment);
+    Assert.True(!environment.Contains("RE-SepFormer", StringComparison.OrdinalIgnoreCase), "Unintegrated research models must not appear as selectable runtimes.");
+    Assert.True(!environment.Contains("TF-GridNet", StringComparison.OrdinalIgnoreCase), "Unintegrated research models must not appear as selectable runtimes.");
 }
 
 static class Assert

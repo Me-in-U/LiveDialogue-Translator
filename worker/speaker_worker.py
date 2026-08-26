@@ -51,6 +51,11 @@ SAMPLE_RATE = 16000
 BYTES_PER_SECOND = SAMPLE_RATE * 2
 TRANSCRIBE_CHUNK_SECONDS = 1
 TRANSCRIBE_CHUNK_BYTES = BYTES_PER_SECOND * TRANSCRIBE_CHUNK_SECONDS
+SPEECH_SEPARATION_CHUNK_SECONDS = 1.75
+SPEECH_SEPARATION_OVERLAP_SECONDS = 0.25
+SPEECH_SEPARATION_MIN_RMS = 0.0037
+SPEECH_SEPARATION_MIN_SECONDARY_RATIO = 0.12
+SPEECH_SEPARATION_MAX_CORRELATION = 0.985
 DIARIZATION_CONTEXT_SECONDS = 30
 DIARIZATION_MIN_CONTEXT_SECONDS = 4
 QWEN_DIARIZED_CHUNK_SECONDS = DIARIZATION_MIN_CONTEXT_SECONDS
@@ -442,6 +447,15 @@ def normalize_asr_engine(value: Any) -> str:
     return "faster_whisper"
 
 
+def normalize_speech_separation_model(value: Any) -> str:
+    model = str(value or os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL", "none")).strip().lower().replace("-", "_")
+    if model in {"mossformer2", "mossformer2_ss_16k", "mossformer"}:
+        return "mossformer2_ss_16k"
+    if model in {"sepformer", "sepformer_whamr16k", "speechbrain_sepformer"}:
+        return "sepformer_whamr16k"
+    return "none"
+
+
 def normalize_speaker_count_mode(value: Any) -> str:
     mode = str(value or "active_max").strip().lower().replace("-", "_")
     return mode if mode in {"active_max", "exact", "session_max"} else "active_max"
@@ -464,6 +478,7 @@ class WorkerConfig:
     diarization_quality_preset: int = 100
     compute_mode: str = "auto"
     asr_engine: str = "faster_whisper"
+    speech_separation_model: str = "none"
     diarization_enabled: bool = True
     diarization_model: str = "pyannote_community"
     max_speakers: int = 6
@@ -511,6 +526,9 @@ class LocalSpeechEngine:
         self.whisperlivekit_session_lock = threading.RLock()
         self.whisperx_engine = None
         self.diarization_pipeline = None
+        self.speech_separator = None
+        self.speech_separation_input_tail = b""
+        self.speech_separation_output_tails: list[Any] = []
         self.warned_mock = False
         self.speaker_ids: dict[str, str] = {}
         self.speaker_embeddings: dict[str, Any] = {}
@@ -524,6 +542,7 @@ class LocalSpeechEngine:
         self.streaming_diarization_start_ms: dict[str, int] = {}
         self.last_stt_error: str | None = None
         self.last_diarization_error: str | None = None
+        self.last_speech_separation_error: str | None = None
         self.qwen_alignment_debug_emitted = False
         self.qwen_empty_result_debug_emitted = False
         self.qwen_fallback_debug_emitted = False
@@ -552,6 +571,7 @@ class LocalSpeechEngine:
             diarization_quality_preset=clamp_quality_preset(payload.get("diarizationQualityPreset", payload.get("sttQualityPreset", 50))),
             compute_mode=payload.get("computeMode", "auto"),
             asr_engine=normalize_asr_engine(payload.get("asrEngine")),
+            speech_separation_model=normalize_speech_separation_model(payload.get("speechSeparationModel")),
             diarization_enabled=bool(payload.get("diarizationEnabled", True)),
             diarization_model=normalize_diarization_model(payload.get("diarizationModel")),
             max_speakers=max(1, max_speakers),
@@ -590,6 +610,11 @@ class LocalSpeechEngine:
             or previous.diart_rho_update != next_config.diart_rho_update
             or previous.diart_delta_new != next_config.diart_delta_new
         )
+        separation_changed = (
+            previous.compute_mode != next_config.compute_mode
+            or previous.asr_engine != next_config.asr_engine
+            or previous.speech_separation_model != next_config.speech_separation_model
+        )
         if stt_changed:
             self.close_whisperlivekit_session()
             self.whisper_model = None
@@ -613,7 +638,12 @@ class LocalSpeechEngine:
                 self.close_whisperlivekit_session()
             self.diarization_pipeline = None
             self.last_diarization_error = None
-        reset_speakers = stt_changed or diarization_changed
+        if separation_changed:
+            self.speech_separator = None
+            self.speech_separation_input_tail = b""
+            self.speech_separation_output_tails.clear()
+            self.last_speech_separation_error = None
+        reset_speakers = stt_changed or diarization_changed or separation_changed
 
         self.config = next_config
         if reset_speakers:
@@ -632,7 +662,7 @@ class LocalSpeechEngine:
         emit({
             "type": "model_status",
             "stage": "configured",
-            "message": f"engine={self.config.asr_engine}, model={self.config.stt_model}, languages={language_message}, asr_quality={self.config.stt_quality_preset}, diarization_quality={self.config.diarization_quality_preset}, compute={self.config.compute_mode}, diarization={'on' if effective_diarization_enabled else 'off'}, diarization_model={effective_diarization_model}, context={context_message}, {speaker_count}{manual_diart_message}",
+            "message": f"engine={self.config.asr_engine}, model={self.config.stt_model}, languages={language_message}, asr_quality={self.config.stt_quality_preset}, diarization_quality={self.config.diarization_quality_preset}, compute={self.config.compute_mode}, separation={self.config.speech_separation_model}, diarization={'on' if effective_diarization_enabled else 'off'}, diarization_model={effective_diarization_model}, context={context_message}, {speaker_count}{manual_diart_message}",
             "progress": None,
         })
 
@@ -796,7 +826,36 @@ class LocalSpeechEngine:
                 self.last_stt_error = str(exc)
                 emit({"type": "error", "code": "stt_unavailable", "message": str(exc), "recoverable": True})
 
-        if self.config.diarization_enabled and self.diarization_pipeline is None:
+        if self.config.speech_separation_model != "none" and self.speech_separator is None:
+            try:
+                if self._uses_whisperlivekit_asr():
+                    raise RuntimeError("Speech separation is not compatible with the stateful WhisperLiveKit streaming session.")
+                device = self._resolve_torch_device()
+                if device != "cuda":
+                    raise RuntimeError("Speech separation requires an NVIDIA CUDA GPU for the five-second latency target.")
+                self.speech_separator = load_speech_separator(
+                    self.config.speech_separation_model,
+                    self.models_dir,
+                    device,
+                )
+                self.last_speech_separation_error = None
+                emit({
+                    "type": "model_status",
+                    "stage": "speech_separation_loaded",
+                    "message": f"{self.config.speech_separation_model} on {device}",
+                    "progress": 1,
+                })
+            except Exception as exc:
+                self.speech_separator = False
+                self.last_speech_separation_error = str(exc)
+                emit({
+                    "type": "error",
+                    "code": "speech_separation_unavailable",
+                    "message": str(exc),
+                    "recoverable": True,
+                })
+
+        if self.config.diarization_enabled and self.config.speech_separation_model == "none" and self.diarization_pipeline is None:
             token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
             if (
                 self.config.diarization_model != "sortformer"
@@ -855,6 +914,8 @@ class LocalSpeechEngine:
 
         started = time.perf_counter()
         self.ensure_loaded()
+        if self._try_transcribe_separated_speech(source, pcm, timestamp_ms, started):
+            return
         if self._uses_whisperlivekit_asr():
             self._try_transcribe_whisperlivekit_sortformer(source, pcm, timestamp_ms, started)
             return
@@ -915,6 +976,96 @@ class LocalSpeechEngine:
                 wav_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    def _try_transcribe_separated_speech(self, source: str, pcm: bytes, timestamp_ms: int, started: float) -> bool:
+        if (
+            source != "system"
+            or self.config.speech_separation_model == "none"
+            or not self.speech_separator
+            or self._uses_whisperlivekit_asr()
+        ):
+            return False
+
+        overlap_bytes = int(BYTES_PER_SECOND * SPEECH_SEPARATION_OVERLAP_SECONDS)
+        input_tail = self.speech_separation_input_tail
+        combined_pcm = input_tail + pcm
+        self.speech_separation_input_tail = combined_pcm[-overlap_bytes:]
+        try:
+            stems = self.speech_separator.separate(combined_pcm)
+            stems = align_separated_channels(
+                normalize_separated_waveforms(stems),
+                self.speech_separation_output_tails,
+                len(input_tail) // 2,
+            )
+        except Exception as exc:
+            self.last_speech_separation_error = str(exc)
+            emit({"type": "error", "code": "speech_separation_failed", "message": str(exc), "recoverable": True})
+            return False
+
+        if len(stems) != 2:
+            return False
+        tail_samples = int(SAMPLE_RATE * SPEECH_SEPARATION_OVERLAP_SECONDS)
+        self.speech_separation_output_tails = [stem[-tail_samples:].copy() for stem in stems]
+        if not separated_stems_contain_overlap(stems):
+            return False
+
+        results: list[tuple[int, float, str, int, int]] = []
+        for channel, stem in enumerate(stems):
+            stem_pcm = float_waveform_to_pcm(stem)
+            stt_audio = preprocess_stt_pcm(stem_pcm)
+            if stt_audio is None:
+                continue
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
+                wav_path = Path(temp.name)
+            try:
+                write_wav(wav_path, stt_audio.pcm)
+                text = join_text_parts(self._transcribe_wav_parts(wav_path))
+            finally:
+                try:
+                    wav_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            if not text:
+                continue
+            start_ms = timestamp_ms + stt_audio.leading_trim_ms
+            end_ms = max(start_ms + 1, timestamp_ms + int(len(stem_pcm) / BYTES_PER_SECOND * 1000) - stt_audio.trailing_trim_ms)
+            results.append((channel, waveform_rms(stem), text, start_ms, end_ms))
+
+        if not results:
+            return False
+        if len(results) == 2 and captions_are_near_duplicate(results[0][2], results[1][2]):
+            results = [max(results, key=lambda result: result[1])]
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        for channel, _rms, text, start_ms, end_ms in results:
+            speaker_id = self._separated_speaker_id(channel)
+            emit({
+                "type": "speaker_segment",
+                "speakerId": speaker_id,
+                "startMs": start_ms,
+                "endMs": end_ms,
+                "confidence": 0.9,
+            })
+            emit({
+                "type": "final_caption",
+                "speakerId": speaker_id,
+                "text": text,
+                "startMs": start_ms,
+                "endMs": end_ms,
+                "latencyMs": latency_ms,
+            })
+        return True
+
+    def _separated_speaker_id(self, channel: int) -> str:
+        key = f"speech_separation_channel_{channel}"
+        if key not in self.speaker_ids:
+            used = set(self.speaker_ids.values())
+            for index in range(1, max(2, self.config.max_speakers) + 1):
+                candidate = f"speaker_{index}"
+                if candidate not in used:
+                    self.speaker_ids[key] = candidate
+                    break
+        return self.speaker_ids.get(key, self._fallback_speaker_id("system"))
 
     def _try_transcribe_diarized_words(self, source: str, pcm: bytes, timestamp_ms: int, started: float) -> bool:
         if (
@@ -1173,9 +1324,11 @@ class LocalSpeechEngine:
 
     def transcribe_chunk_bytes(self) -> int:
         seconds = transcribe_chunk_seconds_for_quality(self.config.stt_quality_preset)
+        if self.config.speech_separation_model != "none":
+            seconds = min(seconds, SPEECH_SEPARATION_CHUNK_SECONDS)
         if self._uses_qwen_asr() and self.config.diarization_enabled and not self._uses_streaming_diarization():
             seconds = max(seconds, QWEN_DIARIZED_CHUNK_SECONDS)
-        return BYTES_PER_SECOND * seconds
+        return int(BYTES_PER_SECOND * seconds)
 
     def diarization_stream_chunk_bytes(self) -> int:
         return int(BYTES_PER_SECOND * self._diart_step_seconds())
@@ -1593,7 +1746,7 @@ class LocalSpeechEngine:
         return self._fallback_speaker_id(source) if allow_fallback else None
 
     def _uses_streaming_diarization(self) -> bool:
-        return self.config.diarization_model in {"diart", "sortformer"}
+        return self.config.speech_separation_model == "none" and self.config.diarization_model in {"diart", "sortformer"}
 
     def _uses_qwen_asr(self) -> bool:
         return self.config.asr_engine == "qwen3_asr_diarization"
@@ -2088,7 +2241,11 @@ class StreamWorker:
         if not self._models_ready():
             details = "; ".join(
                 message
-                for message in [self.engine.last_stt_error, self.engine.last_diarization_error]
+                for message in [
+                    self.engine.last_stt_error,
+                    self.engine.last_diarization_error,
+                    self.engine.last_speech_separation_error,
+                ]
                 if message
             )
             emit({
@@ -2105,7 +2262,9 @@ class StreamWorker:
     def _models_ready(self) -> bool:
         if not self.engine.whisper_model:
             return False
-        if self.engine.config.diarization_enabled:
+        if self.engine.config.speech_separation_model != "none" and not self.engine.speech_separator:
+            return False
+        if self.engine.config.diarization_enabled and self.engine.config.speech_separation_model == "none":
             return bool(self.engine.diarization_pipeline)
         return True
 
@@ -3962,6 +4121,7 @@ def download_models(models_dir: Path) -> int:
         "diarizationQualityPreset": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_QUALITY_PRESET", os.environ.get("LIVE_DIALOGUE_TRANSLATOR_STT_QUALITY_PRESET", 50)),
         "computeMode": "auto",
         "asrEngine": normalize_asr_engine(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE")),
+        "speechSeparationModel": normalize_speech_separation_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL")),
         "diarizationEnabled": diarization_enabled,
         "diarizationModel": diarization_model,
         "maxSpeakers": 6,
@@ -3978,10 +4138,13 @@ def download_models(models_dir: Path) -> int:
         if materialize_model_cache_links(models_dir, engine.config.stt_model):
             engine.whisper_model = None
             engine.ensure_loaded()
-    if diarization_enabled and not engine.diarization_pipeline:
+    if diarization_enabled and engine.config.speech_separation_model == "none" and not engine.diarization_pipeline:
         if materialize_model_cache_links(models_dir, engine.config.stt_model):
             engine.diarization_pipeline = None
             engine.ensure_loaded()
+    if engine.config.speech_separation_model != "none" and not engine.speech_separator:
+        print("Speech separation model preparation failed. See the error above.", file=sys.stderr)
+        return 4
     if default_whisper and not engine.whisper_model and should_repair_whisper_cache(engine.last_stt_error):
         repaired = repair_whisper_cache(models_dir, engine.config.stt_model)
         if repaired:
@@ -3994,7 +4157,7 @@ def download_models(models_dir: Path) -> int:
     if not engine.whisper_model:
         print("STT model preparation failed. See the error above.", file=sys.stderr)
         return 2
-    if diarization_enabled and not engine.diarization_pipeline:
+    if diarization_enabled and engine.config.speech_separation_model == "none" and not engine.diarization_pipeline:
         message = "Diarization model preparation failed."
         if engine.config.diarization_model != "sortformer":
             message += " Accept the required pyannote model terms and save a valid Hugging Face token."
@@ -4277,6 +4440,156 @@ def pcm_to_waveform(pcm: bytes):
     return torch.from_numpy(samples).unsqueeze(0)
 
 
+class MossFormer2Separator:
+    def __init__(self, models_dir: Path) -> None:
+        from clearvoice import ClearVoice
+
+        self.models_dir = models_dir
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        previous_directory = Path.cwd()
+        try:
+            os.chdir(self.models_dir)
+            self.model = call_without_stdout_noise(lambda: ClearVoice(
+                task="speech_separation",
+                model_names=["MossFormer2_SS_16K"],
+            ))
+        finally:
+            os.chdir(previous_directory)
+
+    def separate(self, pcm: bytes) -> list[Any]:
+        import numpy as np
+
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        separated = normalize_separated_waveforms(
+            call_without_stdout_noise(lambda: self.model(samples.reshape(1, -1)))
+        )
+        return [stem[:samples.size] for stem in separated]
+
+
+class SepFormerSeparator:
+    def __init__(self, models_dir: Path, device: str) -> None:
+        apply_torchaudio_compatibility_shims()
+        patch_speechbrain_lazy_module_inspection()
+        from speechbrain.inference.separation import SepformerSeparation
+
+        models_dir.mkdir(parents=True, exist_ok=True)
+        self.model = call_without_stdout_noise(lambda: SepformerSeparation.from_hparams(
+            source="speechbrain/sepformer-whamr16k",
+            savedir=str(models_dir),
+            run_opts={"device": device},
+        ))
+
+    def separate(self, pcm: bytes) -> list[Any]:
+        import numpy as np
+        import torch
+
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        with torch.inference_mode():
+            separated = self.model.separate_batch(torch.from_numpy(samples).unsqueeze(0))
+        return normalize_separated_waveforms(separated)
+
+
+def load_speech_separator(model: str, models_dir: Path, device: str) -> Any:
+    normalized = normalize_speech_separation_model(model)
+    root = models_dir / "speech-separation"
+    if normalized == "mossformer2_ss_16k":
+        return MossFormer2Separator(root / "mossformer2")
+    if normalized == "sepformer_whamr16k":
+        return SepFormerSeparator(root / "sepformer-whamr16k", device)
+    raise ValueError(f"Unsupported speech separation model: {model}")
+
+
+def normalize_separated_waveforms(value: Any) -> list[Any]:
+    import numpy as np
+
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    array_value = np.asarray(value, dtype=np.float32)
+    while array_value.ndim > 2 and array_value.shape[0] == 1:
+        array_value = array_value[0]
+    if array_value.ndim != 2:
+        raise ValueError(f"Speech separator returned an unsupported shape: {array_value.shape}")
+    if array_value.shape[0] == 2:
+        stems = [array_value[0], array_value[1]]
+    elif array_value.shape[1] == 2:
+        stems = [array_value[:, 0], array_value[:, 1]]
+    else:
+        raise ValueError(f"Speech separator must return exactly two channels: {array_value.shape}")
+    minimum_length = min(len(stem) for stem in stems)
+    return [np.asarray(stem[:minimum_length], dtype=np.float32).reshape(-1) for stem in stems]
+
+
+def align_separated_channels(stems: list[Any], previous_tails: list[Any], overlap_samples: int) -> list[Any]:
+    if len(stems) != 2:
+        return stems
+    if overlap_samples <= 0:
+        return sorted(stems, key=waveform_rms, reverse=True)
+
+    prefix_length = min(overlap_samples, len(stems[0]), len(stems[1]))
+    if len(previous_tails) == 2 and prefix_length > 0:
+        direct = waveform_similarity(previous_tails[0], stems[0][:prefix_length]) + waveform_similarity(previous_tails[1], stems[1][:prefix_length])
+        swapped = waveform_similarity(previous_tails[0], stems[1][:prefix_length]) + waveform_similarity(previous_tails[1], stems[0][:prefix_length])
+        if swapped > direct:
+            stems = [stems[1], stems[0]]
+    else:
+        stems = sorted(stems, key=waveform_rms, reverse=True)
+    return [stem[prefix_length:] for stem in stems]
+
+
+def waveform_rms(waveform: Any) -> float:
+    import numpy as np
+
+    samples = np.asarray(waveform, dtype=np.float32).reshape(-1)
+    if samples.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(samples), dtype=np.float64)))
+
+
+def waveform_similarity(left: Any, right: Any) -> float:
+    import numpy as np
+
+    left_samples = np.asarray(left, dtype=np.float32).reshape(-1)
+    right_samples = np.asarray(right, dtype=np.float32).reshape(-1)
+    length = min(left_samples.size, right_samples.size)
+    if length < 2:
+        return 0.0
+    left_samples = left_samples[-length:]
+    right_samples = right_samples[:length]
+    left_samples = left_samples - float(np.mean(left_samples))
+    right_samples = right_samples - float(np.mean(right_samples))
+    denominator = float(np.linalg.norm(left_samples) * np.linalg.norm(right_samples))
+    return float(np.dot(left_samples, right_samples) / denominator) if denominator > 1e-9 else 0.0
+
+
+def separated_stems_contain_overlap(stems: list[Any]) -> bool:
+    if len(stems) != 2:
+        return False
+    levels = sorted((waveform_rms(stem) for stem in stems), reverse=True)
+    if levels[0] < SPEECH_SEPARATION_MIN_RMS or levels[1] < SPEECH_SEPARATION_MIN_RMS:
+        return False
+    if levels[1] / max(levels[0], 1e-9) < SPEECH_SEPARATION_MIN_SECONDARY_RATIO:
+        return False
+    return abs(waveform_similarity(stems[0], stems[1])) < SPEECH_SEPARATION_MAX_CORRELATION
+
+
+def float_waveform_to_pcm(waveform: Any) -> bytes:
+    import numpy as np
+
+    samples = np.asarray(waveform, dtype=np.float32).reshape(-1)
+    return np.clip(samples * 32768.0, -32768.0, 32767.0).astype("<i2").tobytes()
+
+
+def captions_are_near_duplicate(left: str, right: str) -> bool:
+    left_key = canonical_transcription_text(left)
+    right_key = canonical_transcription_text(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    shorter, longer = sorted((left_key, right_key), key=len)
+    return len(shorter) >= 6 and shorter in longer and len(shorter) / len(longer) >= 0.75
+
+
 def pcm_has_voice(pcm: bytes) -> bool:
     return samples_rms(pcm_to_samples(pcm)) >= VOICE_RMS_THRESHOLD
 
@@ -4336,6 +4649,7 @@ def check_environment(models_dir: Path) -> int:
     asr_engine = normalize_asr_engine(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"))
     diarization_enabled = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     diarization_model = normalize_diarization_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_MODEL"))
+    speech_separation_model = normalize_speech_separation_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL"))
     materialize_model_cache_links(models_dir, stt_model)
     packages = {
         "faster_whisper": has_module("faster_whisper"),
@@ -4345,6 +4659,8 @@ def check_environment(models_dir: Path) -> int:
         "qwen_asr": has_module("qwen_asr"),
         "whisperlivekit": has_module("whisperlivekit"),
         "whisperx": has_module("whisperx"),
+        "clearvoice": has_module("clearvoice"),
+        "speechbrain": has_module("speechbrain"),
     }
     whisper_root = models_dir / "whisper"
     if asr_engine == "qwen3_asr_diarization":
@@ -4385,10 +4701,33 @@ def check_environment(models_dir: Path) -> int:
         "sttModelPrepared": model_prepared,
         "sttModelLoadable": stt_model_loadable,
         "diarizationModelPrepared": is_diarization_model_prepared(models_dir, diarization_model, diarization_enabled),
+        "speechSeparationAvailable": is_speech_separation_package_available(speech_separation_model, packages),
+        "speechSeparationModelPrepared": is_speech_separation_model_prepared(models_dir, speech_separation_model),
         "sttModelError": stt_model_error,
         "sttModel": stt_model,
     }, ensure_ascii=False), flush=True)
     return 0
+
+
+def is_speech_separation_package_available(model: str, packages: dict[str, bool]) -> bool:
+    if model == "mossformer2_ss_16k":
+        return packages.get("clearvoice", False)
+    if model == "sepformer_whamr16k":
+        return packages.get("speechbrain", False)
+    return True
+
+
+def is_speech_separation_model_prepared(models_dir: Path, model: str) -> bool:
+    if model == "none":
+        return True
+    root = models_dir / "speech-separation"
+    if model == "mossformer2_ss_16k":
+        checkpoint_root = root / "mossformer2" / "checkpoints" / "MossFormer2_SS_16K"
+        return (checkpoint_root / "last_best_checkpoint").exists()
+    if model == "sepformer_whamr16k":
+        checkpoint_root = root / "sepformer-whamr16k"
+        return (checkpoint_root / "hyperparams.yaml").exists() and any(checkpoint_root.rglob("*.ckpt"))
+    return False
 
 
 def is_diarization_model_prepared(models_dir: Path, diarization_model: str, diarization_enabled: bool) -> bool:
