@@ -52,6 +52,7 @@ public sealed class AppSettings
     public int OverlayDisplayLines { get; set; } = 3;
     public bool ShowLatency { get; set; } = true;
     public string TargetLanguage { get; set; } = "ko";
+    public string? GoogleTranslateApiKey { get; set; }
     public bool Topmost { get; set; } = true;
     public bool OverlayOpen { get; set; }
     public OverlayWindowSettings Overlay { get; set; } = OverlayWindowSettings.Default();

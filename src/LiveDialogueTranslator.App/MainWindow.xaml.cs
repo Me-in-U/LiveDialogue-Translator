@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private bool closingApp;
     private string pythonConsoleModelKey = string.Empty;
     private DateTime lastCaptionActiveSpeakerUpdateUtc = DateTime.MinValue;
+    private DateTimeOffset translationRateLimitNoticeUntil = DateTimeOffset.MinValue;
     private HardwareProfile hardwareProfile = HardwareProfile.Unknown;
     private SpeechSeparationRecommendation speechSeparationRecommendation = new(
         SpeechSeparationModel.None,
@@ -273,7 +274,7 @@ public partial class MainWindow : Window
         DiartDeltaBox.ToolTip = L("DiartDeltaNewHelp");
         TranslateApiLabel.Text = L("TranslateApi");
         TargetLanguageLabel.Text = L("TargetLanguage");
-        TranslationProviderAvailabilityText.Text = L("TranslationProviderAvailability");
+        UpdateTranslationProviderAvailabilityText();
         SetUnavailableTranslationProviderItem(TranslateProviderGoogle2Item, "Google2");
         SetUnavailableTranslationProviderItem(TranslateProviderOllamaItem, "Ollama");
         SetUnavailableTranslationProviderItem(TranslateProviderOpenAIItem, "OpenAI");
@@ -283,7 +284,7 @@ public partial class MainWindow : Window
         SetUnavailableTranslationProviderItem(TranslateProviderBaiduItem, "Baidu");
         SetUnavailableTranslationProviderItem(TranslateProviderMTranServerItem, "MTranServer");
         SetUnavailableTranslationProviderItem(TranslateProviderLibreTranslateItem, "LibreTranslate");
-        TranslateApiSettingsButton.Content = L("TranslationSupportInfo");
+        TranslateApiSettingsButton.Content = L("ApiSetting");
         TranslateApiSettingsButton.ToolTip = L("ApiSetting");
         CaptionDisplayModeLabel.Text = L("CaptionDisplayMode");
         DisplayOriginalRadio.Content = L("DisplayOriginal");
@@ -1070,7 +1071,12 @@ public partial class MainWindow : Window
             await translationGate.WaitAsync(cts.Token);
             try
             {
-                translated = await translationService.TranslateAsync(text, targetLanguage, provider, cts.Token);
+                translated = await translationService.TranslateAsync(
+                    text,
+                    targetLanguage,
+                    provider,
+                    settings.GoogleTranslateApiKey,
+                    cts.Token);
             }
             finally
             {
@@ -1089,6 +1095,7 @@ public partial class MainWindow : Window
                     return;
                 }
 
+                translationRateLimitNoticeUntil = DateTimeOffset.MinValue;
                 translationTexts[entryId] = translated;
                 translationRequests.Remove(entryId);
                 var entry = merger.Entries.FirstOrDefault(candidate => candidate.Id == entryId);
@@ -1109,6 +1116,26 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (TranslationRateLimitException ex)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (now < translationRateLimitNoticeUntil)
+                {
+                    return;
+                }
+
+                translationRateLimitNoticeUntil = now + ex.RetryAfter;
+                var retrySeconds = Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds));
+                var message = LF("TranslationRateLimited", retrySeconds);
+                AppendConsoleLine(new WorkerLogLine("translation", message));
+                if (activePage == AppPage.Captions)
+                {
+                    ShowCaptionDetail(L("Translation"), message, L("Warning"));
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -1723,12 +1750,22 @@ public partial class MainWindow : Window
 
     private void TranslateApiSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show(
-            this,
-            L("TranslationApiDummyHelp"),
-            L("ApiSetting"),
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
+        var window = new TranslationApiWindow(settings.GoogleTranslateApiKey, localizer)
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() != true)
+        {
+            return;
+        }
+
+        settings.GoogleTranslateApiKey = window.GoogleApiKey;
+        settingsStore.Save(settings);
+        UpdateTranslationProviderAvailabilityText();
+        ClearTranslations();
+        ApplyDisplaySettings();
+        SetStatus(L("TranslationApiKeySaved"));
     }
 
     private async void DetailActionButton_Click(object sender, RoutedEventArgs e)
@@ -1810,6 +1847,7 @@ public partial class MainWindow : Window
                 settings.AsrEngine,
                 settings.SttModel);
             SelectByTag(TranslateProviderBox, settings.TranslateProvider.ToString());
+            UpdateTranslationProviderAvailabilityText();
             SelectByTag(TargetLanguageBox, settings.TargetLanguage);
             SelectCaptionDisplayMode(settings.CaptionDisplayMode);
             SelectSpeakerCount(settings);
@@ -1899,6 +1937,14 @@ public partial class MainWindow : Window
         translationRequests.Clear();
         translationTexts.Clear();
         translationSourceTexts.Clear();
+        translationRateLimitNoticeUntil = DateTimeOffset.MinValue;
+    }
+
+    private void UpdateTranslationProviderAvailabilityText()
+    {
+        TranslationProviderAvailabilityText.Text = string.IsNullOrWhiteSpace(settings.GoogleTranslateApiKey)
+            ? L("TranslationProviderAvailability")
+            : L("TranslationProviderConfigured");
     }
 
     private CaptionDisplayMode SelectedCaptionDisplayMode()

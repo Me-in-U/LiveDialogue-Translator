@@ -1,0 +1,52 @@
+<Window x:Class="LiveDialogueTranslator.App.TranslationApiWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Google Translation API"
+        Width="560"
+        Height="250"
+        MinWidth="500"
+        MinHeight="230"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBrush}">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TitleText"
+                   FontSize="20"
+                   FontWeight="SemiBold"
+                   Text="Google Translation API" />
+        <TextBlock x:Name="DescriptionText"
+                   Grid.Row="1"
+                   Margin="0,8,0,16"
+                   Foreground="{StaticResource MutedBrush}"
+                   TextWrapping="Wrap"
+                   Text="Enter a Cloud Translation API key for reliable live translation." />
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="ApiKeyLabel" VerticalAlignment="Center" Text="Google API key" />
+            <PasswordBox x:Name="ApiKeyBox"
+                         Grid.Column="1"
+                         Padding="8,4"
+                         Background="{StaticResource PanelAltBrush}"
+                         BorderBrush="{StaticResource BorderBrushSoft}"
+                         Foreground="{StaticResource TextBrush}" />
+        </Grid>
+
+        <StackPanel Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal">
+            <Button x:Name="OpenGoogleCloudButton" Width="140" Height="30" Margin="0,0,8,0" Click="OpenGoogleCloudButton_Click">Open Google Cloud</Button>
+            <Button x:Name="CancelButton" Width="86" Height="30" Margin="0,0,8,0" Click="CancelButton_Click">Cancel</Button>
+            <Button x:Name="SaveButton" Width="86" Height="30" Click="SaveButton_Click">Save</Button>
+        </StackPanel>
+    </Grid>
+</Window>

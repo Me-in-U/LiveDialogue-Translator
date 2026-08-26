@@ -66,6 +66,8 @@ var tests = new (string Name, Action Body)[]
     ("main window has console page and inline debug state", MainWindowHasConsolePageAndInlineDebugState),
     ("main window removes history page", MainWindowRemovesHistoryPage),
     ("translation service uses google provider and dummy providers", TranslationServiceUsesGoogleProviderAndDummyProviders),
+    ("translation service backs off and caches repeated google requests", TranslationServiceBacksOffAndCachesGoogleRequests),
+    ("translation settings support an official google api key", TranslationSettingsSupportOfficialGoogleApiKey),
     ("main window exposes translation provider and display modes", MainWindowExposesTranslationProviderAndDisplayModes),
     ("main window applies target translation language immediately", MainWindowAppliesTargetTranslationLanguageImmediately),
     ("main window renders translated captions below originals", MainWindowRendersTranslatedCaptionsBelowOriginals),
@@ -1151,6 +1153,46 @@ static void TranslationServiceUsesGoogleProviderAndDummyProviders()
     Assert.Contains("translate.googleapis.com/translate_a/single", source);
     Assert.Contains("TranslateProvider.Google =>", source);
     Assert.Contains("DummyTranslateAsync(provider", source);
+}
+
+static void TranslationServiceBacksOffAndCachesGoogleRequests()
+{
+    var source = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "TranslationService.cs"));
+    var mainWindow = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
+    var localizer = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
+
+    Assert.Contains("private static readonly TimeSpan PublicRequestInterval", source);
+    Assert.Contains("private readonly SemaphoreSlim googleRequestGate = new(1, 1);", source);
+    Assert.Contains("translationCache.TryGetValue(cacheKey", source);
+    Assert.Contains("response.StatusCode != HttpStatusCode.TooManyRequests", source);
+    Assert.Contains("response.Headers.RetryAfter", source);
+    Assert.Contains("currentRateLimitBackoff.TotalMilliseconds * 2", source);
+    Assert.Contains("retryAfter.TotalMilliseconds * 2", source);
+    Assert.Contains("await Task.Delay(availableAt - now, token);", source);
+    Assert.Contains("catch (TranslationRateLimitException ex)", mainWindow);
+    Assert.Contains("translationRateLimitNoticeUntil", mainWindow);
+    Assert.Contains("TranslationRateLimited", localizer);
+}
+
+static void TranslationSettingsSupportOfficialGoogleApiKey()
+{
+    var service = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "TranslationService.cs"));
+    var settings = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Models", "AppSettings.cs"));
+    var mainWindow = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "MainWindow.xaml.cs"));
+    var apiWindowXaml = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "TranslationApiWindow.xaml"));
+    var apiWindowSource = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "TranslationApiWindow.xaml.cs"));
+
+    Assert.Contains("public string? GoogleTranslateApiKey", settings);
+    Assert.Contains("translation.googleapis.com/language/translate/v2", service);
+    Assert.Contains("X-Goog-Api-Key", service);
+    Assert.Contains("new FormUrlEncodedContent", service);
+    Assert.Contains("ParseOfficialGoogleResponse", service);
+    Assert.Contains("settings.GoogleTranslateApiKey", mainWindow);
+    Assert.Contains("new TranslationApiWindow", mainWindow);
+    Assert.Contains("UpdateTranslationProviderAvailabilityText();", mainWindow);
+    Assert.Contains("x:Name=\"ApiKeyBox\"", apiWindowXaml);
+    Assert.Contains("GoogleCloudTranslationApiUrl", apiWindowSource);
+    Assert.Contains("ApiKeyBox.Password.Trim()", apiWindowSource);
 }
 
 static void MainWindowExposesTranslationProviderAndDisplayModes()
