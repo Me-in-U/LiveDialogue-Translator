@@ -788,6 +788,7 @@ print("ok")
     def test_check_environment_does_not_validate_qwen_as_faster_whisper_model(self) -> None:
         original_has_module = speaker_worker.has_module
         original_qwen_runtime_error = speaker_worker.qwen_asr_runtime_error
+        original_qwen_files_prepared = speaker_worker.qwen_model_files_prepared
         original_materialize = speaker_worker.materialize_model_cache_links
         original_env = {
             "LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"),
@@ -795,6 +796,7 @@ print("ok")
         }
         speaker_worker.has_module = lambda name: name in {"faster_whisper", "qwen_asr", "torch"}
         speaker_worker.qwen_asr_runtime_error = lambda: None
+        speaker_worker.qwen_model_files_prepared = lambda *_args: True
         speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
         os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "qwen3_asr_diarization"
         os.environ["LIVE_DIALOGUE_TRANSLATOR_STT_MODEL"] = "qwen3-asr-1.7b"
@@ -805,6 +807,7 @@ print("ok")
         finally:
             speaker_worker.has_module = original_has_module
             speaker_worker.qwen_asr_runtime_error = original_qwen_runtime_error
+            speaker_worker.qwen_model_files_prepared = original_qwen_files_prepared
             speaker_worker.materialize_model_cache_links = original_materialize
             for key, value in original_env.items():
                 if value is None:
@@ -821,10 +824,12 @@ print("ok")
     def test_check_environment_rejects_incompatible_qwen_runtime(self) -> None:
         original_has_module = speaker_worker.has_module
         original_qwen_runtime_error = speaker_worker.qwen_asr_runtime_error
+        original_qwen_files_prepared = speaker_worker.qwen_model_files_prepared
         original_materialize = speaker_worker.materialize_model_cache_links
         original_engine = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE")
         speaker_worker.has_module = lambda name: name in {"faster_whisper", "qwen_asr", "torch"}
         speaker_worker.qwen_asr_runtime_error = lambda: "huggingface-hub must be below 1.0"
+        speaker_worker.qwen_model_files_prepared = lambda *_args: True
         speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
         os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "qwen3_asr_diarization"
         stdout = io.StringIO()
@@ -834,6 +839,7 @@ print("ok")
         finally:
             speaker_worker.has_module = original_has_module
             speaker_worker.qwen_asr_runtime_error = original_qwen_runtime_error
+            speaker_worker.qwen_model_files_prepared = original_qwen_files_prepared
             speaker_worker.materialize_model_cache_links = original_materialize
             if original_engine is None:
                 os.environ.pop("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE", None)
@@ -1355,17 +1361,23 @@ print("ok")
 
         original_qwen = sys.modules.get("qwen_asr")
         original_attention = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_ATTENTION")
+        original_snapshot = speaker_worker.ensure_qwen_snapshot
         try:
             sys.modules["qwen_asr"] = fake_qwen
             os.environ.pop("LIVE_DIALOGUE_TRANSLATOR_QWEN_ATTENTION", None)
+            speaker_worker.ensure_qwen_snapshot = lambda model_id: Path("models") / model_id.split("/")[-1]
 
             model = speaker_worker.load_qwen_asr_model("qwen3-asr-0.6b", "cuda")
 
             self.assertEqual("qwen", model)
-            self.assertEqual("Qwen/Qwen3-ASR-0.6B", calls[0][0])
+            self.assertEqual(str(Path("models") / "Qwen3-ASR-0.6B"), calls[0][0])
+            self.assertEqual(str(Path("models") / "Qwen3-ForcedAligner-0.6B"), calls[0][1]["forced_aligner"])
+            self.assertTrue(calls[0][1]["local_files_only"])
             self.assertEqual("sdpa", calls[0][1]["attn_implementation"])
             self.assertEqual("sdpa", calls[0][1]["forced_aligner_kwargs"]["attn_implementation"])
+            self.assertTrue(calls[0][1]["forced_aligner_kwargs"]["local_files_only"])
         finally:
+            speaker_worker.ensure_qwen_snapshot = original_snapshot
             if original_qwen is None:
                 sys.modules.pop("qwen_asr", None)
             else:
@@ -3826,6 +3838,41 @@ print("ok")
             self.assertTrue(speaker_worker.is_speech_separation_model_prepared(root, "mossformer2_ss_16k"))
             self.assertTrue(speaker_worker.is_speech_separation_model_prepared(root, "sepformer_whamr16k"))
             self.assertTrue(speaker_worker.is_speech_separation_model_prepared(root, "none"))
+
+    def test_qwen_snapshot_preparation_requires_complete_valid_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = Path(temp_dir)
+            snapshot = (
+                models_dir
+                / "huggingface"
+                / "hub"
+                / "models--Qwen--Qwen3-ASR-0.6B"
+                / "snapshots"
+                / "revision"
+            )
+            snapshot.mkdir(parents=True)
+            (snapshot / "config.json").write_text('{"model_type":"qwen3_asr"}', encoding="utf-8")
+
+            self.assertFalse(speaker_worker.qwen_cached_snapshot_prepared(models_dir, "Qwen/Qwen3-ASR-0.6B"))
+
+            for name in speaker_worker.QWEN_SNAPSHOT_REQUIRED_FILES:
+                if name == "config.json":
+                    continue
+                (snapshot / name).write_bytes(b"ready")
+            (snapshot / "model.safetensors").write_bytes(b"weights")
+
+            self.assertTrue(speaker_worker.qwen_cached_snapshot_prepared(models_dir, "Qwen/Qwen3-ASR-0.6B"))
+            (snapshot / "model.safetensors").unlink()
+            (snapshot / "model.safetensors.index.json").write_text(
+                '{"weight_map":{"first":"model-00001-of-00002.safetensors","second":"model-00002-of-00002.safetensors"}}',
+                encoding="utf-8",
+            )
+            (snapshot / "model-00001-of-00002.safetensors").write_bytes(b"weights")
+            self.assertFalse(speaker_worker.qwen_cached_snapshot_prepared(models_dir, "Qwen/Qwen3-ASR-0.6B"))
+            (snapshot / "model-00002-of-00002.safetensors").write_bytes(b"weights")
+            self.assertTrue(speaker_worker.qwen_cached_snapshot_prepared(models_dir, "Qwen/Qwen3-ASR-0.6B"))
+            (snapshot / "config.json").write_text('{"model_type":"wrong"}', encoding="utf-8")
+            self.assertFalse(speaker_worker.qwen_cached_snapshot_prepared(models_dir, "Qwen/Qwen3-ASR-0.6B"))
 
 
 if __name__ == "__main__":

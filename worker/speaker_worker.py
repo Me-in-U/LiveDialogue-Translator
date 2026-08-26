@@ -82,6 +82,15 @@ QWEN_FORCED_ALIGNER_LANGUAGES = {
     "russian",
     "spanish",
 }
+QWEN_SNAPSHOT_REQUIRED_FILES = (
+    "chat_template.json",
+    "config.json",
+    "generation_config.json",
+    "merges.txt",
+    "preprocessor_config.json",
+    "tokenizer_config.json",
+    "vocab.json",
+)
 QWEN_TRANSCRIPTION_CONTEXT = (
     "Transcribe the audio verbatim in the requested language. "
     "Include natural punctuation and sentence boundaries. "
@@ -2467,23 +2476,94 @@ def load_qwen_asr_model(model_name: str, device: str) -> Any:
     import torch
     from qwen_asr import Qwen3ASRModel
 
+    model_path = ensure_qwen_snapshot(qwen_asr_model_id(model_name))
     use_aligner = qwen_forced_aligner_enabled()
     kwargs: dict[str, Any] = {
         "dtype": torch.bfloat16 if device == "cuda" else torch.float32,
         "device_map": "cuda:0" if device == "cuda" else "cpu",
         "attn_implementation": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_ATTENTION", "sdpa"),
+        "local_files_only": True,
         "max_inference_batch_size": 4,
         "max_new_tokens": 512,
     }
     if use_aligner:
-        kwargs["forced_aligner"] = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_FORCED_ALIGNER", "Qwen/Qwen3-ForcedAligner-0.6B")
+        aligner_id = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_FORCED_ALIGNER", "Qwen/Qwen3-ForcedAligner-0.6B")
+        kwargs["forced_aligner"] = str(ensure_qwen_snapshot(aligner_id))
         kwargs["forced_aligner_kwargs"] = {
             "device_map": kwargs["device_map"],
             "dtype": kwargs["dtype"],
             "attn_implementation": kwargs["attn_implementation"],
+            "local_files_only": True,
         }
 
-    return Qwen3ASRModel.from_pretrained(qwen_asr_model_id(model_name), **kwargs)
+    return Qwen3ASRModel.from_pretrained(str(model_path), **kwargs)
+
+
+def ensure_qwen_snapshot(model_id: str) -> Path:
+    from huggingface_hub import hf_hub_download, snapshot_download
+
+    snapshot_path = Path(snapshot_download(repo_id=model_id))
+    validation_error = qwen_snapshot_validation_error(snapshot_path)
+    if validation_error and "config.json" in validation_error:
+        downloaded_config = Path(hf_hub_download(repo_id=model_id, filename="config.json", force_download=True))
+        snapshot_path = downloaded_config.parent
+        validation_error = qwen_snapshot_validation_error(snapshot_path)
+    if validation_error:
+        raise RuntimeError(f"Incomplete Qwen model snapshot for {model_id}: {validation_error}")
+    return snapshot_path
+
+
+def qwen_snapshot_validation_error(snapshot_path: Path) -> str | None:
+    missing = [name for name in QWEN_SNAPSHOT_REQUIRED_FILES if not (snapshot_path / name).is_file()]
+    if missing:
+        return f"missing {', '.join(missing)}"
+    single_weights = (snapshot_path / "model.safetensors").is_file()
+    if not single_weights:
+        index_path = snapshot_path / "model.safetensors.index.json"
+        if not index_path.is_file():
+            return "missing model.safetensors or model.safetensors.index.json"
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            return f"invalid model.safetensors.index.json: {exc}"
+        shard_names = set((index.get("weight_map") or {}).values())
+        missing_shards = sorted(name for name in shard_names if not (snapshot_path / name).is_file())
+        if not shard_names:
+            return "model.safetensors.index.json has no weight shards"
+        if missing_shards:
+            return f"missing {', '.join(missing_shards)}"
+
+    config_path = snapshot_path / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return f"invalid config.json: {exc}"
+    if config.get("model_type") != "qwen3_asr":
+        return "config.json model_type must be qwen3_asr"
+    return None
+
+
+def qwen_model_files_prepared(models_dir: Path, model_name: str) -> bool:
+    model_ids = [qwen_asr_model_id(model_name)]
+    if qwen_forced_aligner_enabled():
+        model_ids.append(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_QWEN_FORCED_ALIGNER", "Qwen/Qwen3-ForcedAligner-0.6B"))
+    return all(qwen_cached_snapshot_prepared(models_dir, model_id) for model_id in model_ids)
+
+
+def qwen_cached_snapshot_prepared(models_dir: Path, model_id: str) -> bool:
+    snapshots_root = (
+        models_dir
+        / "huggingface"
+        / "hub"
+        / f"models--{model_id.replace('/', '--')}"
+        / "snapshots"
+    )
+    if not snapshots_root.is_dir():
+        return False
+    return any(
+        snapshot.is_dir() and qwen_snapshot_validation_error(snapshot) is None
+        for snapshot in snapshots_root.iterdir()
+    )
 
 
 def qwen_forced_aligner_enabled() -> bool:
@@ -4653,6 +4733,7 @@ def check_environment(models_dir: Path) -> int:
     speech_separation_model = normalize_speech_separation_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL"))
     materialize_model_cache_links(models_dir, stt_model)
     qwen_runtime_error = qwen_asr_runtime_error() if asr_engine == "qwen3_asr_diarization" else None
+    qwen_files_ready = qwen_model_files_prepared(models_dir, stt_model) if asr_engine == "qwen3_asr_diarization" else True
     packages = {
         "faster_whisper": has_module("faster_whisper"),
         "pyannote_audio": has_module("pyannote.audio"),
@@ -4666,15 +4747,17 @@ def check_environment(models_dir: Path) -> int:
     }
     whisper_root = models_dir / "whisper"
     if asr_engine == "qwen3_asr_diarization":
-        model_prepared = packages["qwen_asr"]
+        model_prepared = packages["qwen_asr"] and qwen_files_ready
     elif asr_engine == "whisperlivekit_sortformer":
         model_prepared = packages["whisperlivekit"]
     else:
         model_prepared = any(whisper_root.rglob("*")) if whisper_root.exists() else False
     stt_model_loadable = False
     stt_model_error = qwen_runtime_error
+    if asr_engine == "qwen3_asr_diarization" and packages["qwen_asr"] and not qwen_files_ready:
+        stt_model_error = "Qwen3-ASR model files are incomplete and must be downloaded."
     if asr_engine == "qwen3_asr_diarization":
-        stt_model_loadable = packages["qwen_asr"]
+        stt_model_loadable = packages["qwen_asr"] and qwen_files_ready
     elif asr_engine == "whisperlivekit_sortformer":
         stt_model_loadable = packages["whisperlivekit"]
     elif packages["faster_whisper"] and model_prepared:
