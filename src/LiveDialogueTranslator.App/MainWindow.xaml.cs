@@ -1128,8 +1128,8 @@ public partial class MainWindow : Window
                 }
 
                 translationRateLimitNoticeUntil = now + ex.RetryAfter;
-                var retrySeconds = Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalSeconds));
-                var message = LF("TranslationRateLimited", retrySeconds);
+                var retryMinutes = Math.Max(1, (int)Math.Ceiling(ex.RetryAfter.TotalMinutes));
+                var message = LF("TranslationRateLimited", retryMinutes);
                 AppendConsoleLine(new WorkerLogLine("translation", message));
                 if (activePage == AppPage.Captions)
                 {

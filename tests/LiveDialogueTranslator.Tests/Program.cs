@@ -1162,10 +1162,13 @@ static void TranslationServiceBacksOffAndCachesGoogleRequests()
     var localizer = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
 
     Assert.Contains("private static readonly TimeSpan PublicRequestInterval", source);
+    Assert.Contains("private static readonly TimeSpan PublicRateLimitCooldown = TimeSpan.FromMinutes(10);", source);
     Assert.Contains("private readonly SemaphoreSlim googleRequestGate = new(1, 1);", source);
     Assert.Contains("translationCache.TryGetValue(cacheKey", source);
     Assert.Contains("response.StatusCode != HttpStatusCode.TooManyRequests", source);
     Assert.Contains("response.Headers.RetryAfter", source);
+    Assert.Contains("publicBlockedUntil = DateTimeOffset.UtcNow + PublicRateLimitCooldown;", source);
+    Assert.Contains("throw new TranslationRateLimitException(publicBlockedUntil - now);", source);
     Assert.Contains("currentRateLimitBackoff.TotalMilliseconds * 2", source);
     Assert.Contains("retryAfter.TotalMilliseconds * 2", source);
     Assert.Contains("await Task.Delay(availableAt - now, token);", source);

@@ -20,7 +20,8 @@ public sealed class TranslationRateLimitException : HttpRequestException
 public sealed class TranslationService : IDisposable
 {
     private const int MaxCacheEntries = 256;
-    private static readonly TimeSpan PublicRequestInterval = TimeSpan.FromMilliseconds(1100);
+    private static readonly TimeSpan PublicRequestInterval = TimeSpan.FromMilliseconds(2200);
+    private static readonly TimeSpan PublicRateLimitCooldown = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan InitialRateLimitBackoff = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MaximumInlineRetryDelay = TimeSpan.FromMilliseconds(2500);
     private static readonly TimeSpan MaximumRateLimitBackoff = TimeSpan.FromSeconds(30);
@@ -32,7 +33,8 @@ public sealed class TranslationService : IDisposable
     private readonly Dictionary<string, string> translationCache = new(StringComparer.Ordinal);
     private readonly Queue<string> translationCacheOrder = new();
     private DateTimeOffset nextPublicRequestAt = DateTimeOffset.MinValue;
-    private DateTimeOffset rateLimitedUntil = DateTimeOffset.MinValue;
+    private DateTimeOffset publicBlockedUntil = DateTimeOffset.MinValue;
+    private DateTimeOffset officialRateLimitedUntil = DateTimeOffset.MinValue;
     private TimeSpan currentRateLimitBackoff = InitialRateLimitBackoff;
 
     public TranslationService()
@@ -123,13 +125,26 @@ public sealed class TranslationService : IDisposable
                         response.StatusCode);
                 }
 
-                rateLimitedUntil = DateTimeOffset.MinValue;
+                if (useOfficialApi)
+                {
+                    officialRateLimitedUntil = DateTimeOffset.MinValue;
+                }
+                else
+                {
+                    publicBlockedUntil = DateTimeOffset.MinValue;
+                }
                 currentRateLimitBackoff = InitialRateLimitBackoff;
                 return await response.Content.ReadAsStringAsync(token);
             }
 
+            if (!useOfficialApi)
+            {
+                publicBlockedUntil = DateTimeOffset.UtcNow + PublicRateLimitCooldown;
+                throw new TranslationRateLimitException(PublicRateLimitCooldown);
+            }
+
             var retryAfter = ResolveRetryAfter(response);
-            rateLimitedUntil = DateTimeOffset.UtcNow + retryAfter;
+            officialRateLimitedUntil = DateTimeOffset.UtcNow + retryAfter;
             currentRateLimitBackoff = TimeSpan.FromMilliseconds(Math.Min(
                 MaximumRateLimitBackoff.TotalMilliseconds,
                 Math.Max(
@@ -150,12 +165,12 @@ public sealed class TranslationService : IDisposable
     private async Task WaitForGoogleAvailabilityAsync(bool useOfficialApi, CancellationToken token)
     {
         var now = DateTimeOffset.UtcNow;
-        var availableAt = rateLimitedUntil;
-        if (!useOfficialApi && nextPublicRequestAt > availableAt)
+        if (!useOfficialApi && publicBlockedUntil > now)
         {
-            availableAt = nextPublicRequestAt;
+            throw new TranslationRateLimitException(publicBlockedUntil - now);
         }
 
+        var availableAt = useOfficialApi ? officialRateLimitedUntil : nextPublicRequestAt;
         if (availableAt > now)
         {
             await Task.Delay(availableAt - now, token);
