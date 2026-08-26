@@ -265,6 +265,8 @@ public partial class MainWindow : Window
         ModelDetailsGroupTitle.Text = L("ModelDetailsGroup");
         ModelDetailsDescriptionText.Text = L("ModelDetailsDescription");
         AutomaticSettingsTitleText.Text = L("AutomaticSettingsTitle");
+        TranslationEnabledCheck.Content = L("TranslationEnabled");
+        TranslationEnabledCheck.ToolTip = L("TranslationEnabledHelp");
         TranslateApiLabel.Text = L("TranslateApi");
         TargetLanguageLabel.Text = L("TargetLanguage");
         UpdateTranslationProviderAvailabilityText();
@@ -931,6 +933,11 @@ public partial class MainWindow : Window
 
     private string TranslationFor(CaptionEntry entry)
     {
+        if (!settings.TranslationEnabled)
+        {
+            return "";
+        }
+
         return translationTexts.ContainsKey(entry.Id) ? translationTexts[entry.Id] : "";
     }
 
@@ -1024,7 +1031,7 @@ public partial class MainWindow : Window
 
     private void StartTranslationForEntryAsync(CaptionEntry entry)
     {
-        if (settings.CaptionDisplayMode == CaptionDisplayMode.Original)
+        if (!settings.TranslationEnabled || settings.CaptionDisplayMode == CaptionDisplayMode.Original)
         {
             return;
         }
@@ -1286,6 +1293,17 @@ public partial class MainWindow : Window
 
     private void TranslationSetting_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        ApplyTranslationSettingsImmediately();
+    }
+
+    private void TranslationEnabled_CheckedChanged(object sender, RoutedEventArgs e)
+    {
+        if (suppressSettingsChange)
+        {
+            return;
+        }
+
+        UpdateTranslationUiState();
         ApplyTranslationSettingsImmediately();
     }
 
@@ -2130,10 +2148,11 @@ public partial class MainWindow : Window
                 settings.ComputeMode,
                 settings.AsrEngine,
                 settings.SttModel);
+            TranslationEnabledCheck.IsChecked = settings.TranslationEnabled;
             SelectByTag(TranslateProviderBox, settings.TranslateProvider.ToString());
-            UpdateTranslationProviderAvailabilityText();
             SelectByTag(TargetLanguageBox, settings.TargetLanguage);
             SelectCaptionDisplayMode(settings.CaptionDisplayMode);
+            UpdateTranslationUiState();
             SelectSpeakerCount(settings);
             SelectSpeakerCountMode(settings.SpeakerCountMode);
             SelectByContent(CaptionDisplayLinesBox, settings.CaptionDisplayLines.ToString());
@@ -2169,6 +2188,7 @@ public partial class MainWindow : Window
     private void SaveSettingsFromUi()
     {
         var previousPythonConsoleModelKey = pythonConsoleModelKey;
+        var previousTranslationEnabled = settings.TranslationEnabled;
         var previousProvider = settings.TranslateProvider;
         var previousTargetLanguage = settings.TargetLanguage;
         settings.InputMode = ParseSelectedTag(InputModeBox, settings.InputMode);
@@ -2182,6 +2202,7 @@ public partial class MainWindow : Window
         settings.SpeechSeparationModel = ParseSelectedTag(
             SpeechSeparationModelBox,
             settings.SpeechSeparationModel);
+        settings.TranslationEnabled = TranslationEnabledCheck.IsChecked == true;
         settings.TranslateProvider = ParseSelectedTag(TranslateProviderBox, settings.TranslateProvider);
         settings.TargetLanguage = ParseSelectedTag(TargetLanguageBox, settings.TargetLanguage);
         settings.CaptionDisplayMode = SelectedCaptionDisplayMode();
@@ -2208,7 +2229,8 @@ public partial class MainWindow : Window
         ClearPythonConsoleIfModelChanged(previousPythonConsoleModelKey);
         settings.Overlay.Opacity = Math.Clamp(OverlayOpacitySlider.Value / 100.0, 0.0, 1.0);
         settings.Overlay.ClickThrough = OverlayClickThroughCheck.IsChecked == true;
-        if (previousProvider != settings.TranslateProvider ||
+        if (previousTranslationEnabled != settings.TranslationEnabled ||
+            previousProvider != settings.TranslateProvider ||
             !string.Equals(previousTargetLanguage, settings.TargetLanguage, StringComparison.OrdinalIgnoreCase))
         {
             ClearTranslations();
@@ -2232,9 +2254,23 @@ public partial class MainWindow : Window
 
     private void UpdateTranslationProviderAvailabilityText()
     {
-        TranslationProviderAvailabilityText.Text = string.IsNullOrWhiteSpace(settings.GoogleTranslateApiKey)
+        TranslationProviderAvailabilityText.Text = TranslationEnabledCheck.IsChecked != true
+            ? L("TranslationDisabled")
+            : string.IsNullOrWhiteSpace(settings.GoogleTranslateApiKey)
             ? L("TranslationProviderAvailability")
             : L("TranslationProviderConfigured");
+    }
+
+    private void UpdateTranslationUiState()
+    {
+        var enabled = TranslationEnabledCheck.IsChecked == true;
+        TranslationConfigurationPanel.IsEnabled = enabled;
+        TranslationConfigurationPanel.Opacity = enabled ? 1.0 : 0.5;
+        DisplayTranslatedRadio.IsEnabled = enabled;
+        DisplayBothRadio.IsEnabled = enabled;
+        DisplayTranslatedRadio.ToolTip = enabled ? null : L("TranslationEnabledHelp");
+        DisplayBothRadio.ToolTip = enabled ? null : L("TranslationEnabledHelp");
+        UpdateTranslationProviderAvailabilityText();
     }
 
     private CaptionDisplayMode SelectedCaptionDisplayMode()

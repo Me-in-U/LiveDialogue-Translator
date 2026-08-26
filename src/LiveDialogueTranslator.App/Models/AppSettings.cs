@@ -42,6 +42,7 @@ public sealed class AppSettings
     public double DiartTauActive { get; set; } = 0.555;
     public double DiartRhoUpdate { get; set; } = 0.422;
     public double DiartDeltaNew { get; set; } = 1.517;
+    public bool TranslationEnabled { get; set; } = true;
     public TranslateProvider TranslateProvider { get; set; } = TranslateProvider.Google;
     public CaptionDisplayMode CaptionDisplayMode { get; set; } = CaptionDisplayMode.Both;
     public int MaxSpeakers { get; set; } = 4;

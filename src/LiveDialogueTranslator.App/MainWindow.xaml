@@ -447,38 +447,41 @@
                                 <StackPanel>
                                     <TextBlock x:Name="SettingsTranslationGroupTitle" Style="{StaticResource SettingsGroupTitleStyle}" Text="Translation" />
                                     <TextBlock x:Name="SettingsTranslationDescriptionText" Style="{StaticResource SettingsHintStyle}" />
-                                    <TextBlock x:Name="TranslateApiLabel" Margin="2,0,0,4" Text="Translate API" />
-                                    <ComboBox x:Name="TranslateProviderBox" Height="28" SelectionChanged="TranslationSetting_SelectionChanged">
-                                        <ComboBoxItem x:Name="TranslateProviderGoogleItem" Content="Google" Tag="Google" />
-                                        <ComboBoxItem x:Name="TranslateProviderGoogle2Item" Content="Google2" Tag="Google2" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderOllamaItem" Content="Ollama" Tag="Ollama" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderOpenAIItem" Content="OpenAI" Tag="OpenAI" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderOpenRouterItem" Content="OpenRouter" Tag="OpenRouter" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderDeepLItem" Content="DeepL" Tag="DeepL" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderYoudaoItem" Content="Youdao" Tag="Youdao" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderBaiduItem" Content="Baidu" Tag="Baidu" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderMTranServerItem" Content="MTranServer" Tag="MTranServer" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                        <ComboBoxItem x:Name="TranslateProviderLibreTranslateItem" Content="LibreTranslate" Tag="LibreTranslate" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
-                                    </ComboBox>
-                                    <TextBlock x:Name="TranslationProviderAvailabilityText" Margin="2,5,0,0" Style="{StaticResource SettingsHintStyle}" />
-                                    <TextBlock x:Name="TargetLanguageLabel" Margin="2,7,0,3" Text="Target Language" />
-                                    <ComboBox x:Name="TargetLanguageBox" Height="28" MaxDropDownHeight="220" SelectionChanged="TranslationSetting_SelectionChanged">
-                                        <ComboBoxItem Content="ko-KR" Tag="ko" />
-                                        <ComboBoxItem Content="en-US" Tag="en" />
-                                        <ComboBoxItem Content="en-GB" Tag="en" />
-                                        <ComboBoxItem Content="ja-JP" Tag="ja" />
-                                        <ComboBoxItem Content="zh-CN" Tag="zh-CN" />
-                                        <ComboBoxItem Content="zh-TW" Tag="zh-TW" />
-                                        <ComboBoxItem Content="fr-FR" Tag="fr" />
-                                        <ComboBoxItem Content="de-DE" Tag="de" />
-                                        <ComboBoxItem Content="th-TH" Tag="th" />
-                                        <ComboBoxItem Content="ru-RU" Tag="ru" />
-                                        <ComboBoxItem Content="es-ES" Tag="es" />
-                                        <ComboBoxItem Content="pt-BR" Tag="pt" />
-                                        <ComboBoxItem Content="tr-TR" Tag="tr" />
-                                        <ComboBoxItem Content="ar-SA" Tag="ar" />
-                                    </ComboBox>
-                                    <Button x:Name="TranslateApiSettingsButton" Height="27" Margin="0,6,0,0" Click="TranslateApiSettingsButton_Click">Open</Button>
+                                    <CheckBox x:Name="TranslationEnabledCheck" Height="26" Content="Enable translation" Checked="TranslationEnabled_CheckedChanged" Unchecked="TranslationEnabled_CheckedChanged" />
+                                    <StackPanel x:Name="TranslationConfigurationPanel">
+                                        <TextBlock x:Name="TranslateApiLabel" Margin="2,2,0,4" Text="Translate API" />
+                                        <ComboBox x:Name="TranslateProviderBox" Height="28" SelectionChanged="TranslationSetting_SelectionChanged">
+                                            <ComboBoxItem x:Name="TranslateProviderGoogleItem" Content="Google" Tag="Google" />
+                                            <ComboBoxItem x:Name="TranslateProviderGoogle2Item" Content="Google2" Tag="Google2" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderOllamaItem" Content="Ollama" Tag="Ollama" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderOpenAIItem" Content="OpenAI" Tag="OpenAI" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderOpenRouterItem" Content="OpenRouter" Tag="OpenRouter" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderDeepLItem" Content="DeepL" Tag="DeepL" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderYoudaoItem" Content="Youdao" Tag="Youdao" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderBaiduItem" Content="Baidu" Tag="Baidu" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderMTranServerItem" Content="MTranServer" Tag="MTranServer" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                            <ComboBoxItem x:Name="TranslateProviderLibreTranslateItem" Content="LibreTranslate" Tag="LibreTranslate" IsEnabled="False" ToolTipService.ShowOnDisabled="True" />
+                                        </ComboBox>
+                                        <TextBlock x:Name="TranslationProviderAvailabilityText" Margin="2,5,0,0" Style="{StaticResource SettingsHintStyle}" />
+                                        <TextBlock x:Name="TargetLanguageLabel" Margin="2,7,0,3" Text="Target Language" />
+                                        <ComboBox x:Name="TargetLanguageBox" Height="28" MaxDropDownHeight="220" SelectionChanged="TranslationSetting_SelectionChanged">
+                                            <ComboBoxItem Content="ko-KR" Tag="ko" />
+                                            <ComboBoxItem Content="en-US" Tag="en" />
+                                            <ComboBoxItem Content="en-GB" Tag="en" />
+                                            <ComboBoxItem Content="ja-JP" Tag="ja" />
+                                            <ComboBoxItem Content="zh-CN" Tag="zh-CN" />
+                                            <ComboBoxItem Content="zh-TW" Tag="zh-TW" />
+                                            <ComboBoxItem Content="fr-FR" Tag="fr" />
+                                            <ComboBoxItem Content="de-DE" Tag="de" />
+                                            <ComboBoxItem Content="th-TH" Tag="th" />
+                                            <ComboBoxItem Content="ru-RU" Tag="ru" />
+                                            <ComboBoxItem Content="es-ES" Tag="es" />
+                                            <ComboBoxItem Content="pt-BR" Tag="pt" />
+                                            <ComboBoxItem Content="tr-TR" Tag="tr" />
+                                            <ComboBoxItem Content="ar-SA" Tag="ar" />
+                                        </ComboBox>
+                                        <Button x:Name="TranslateApiSettingsButton" Height="27" Margin="0,6,0,0" Click="TranslateApiSettingsButton_Click">Open</Button>
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
 

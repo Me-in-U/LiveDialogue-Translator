@@ -1206,6 +1206,8 @@ static void MainWindowExposesTranslationProviderAndDisplayModes()
     var settingsStore = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "SettingsStore.cs"));
     var localizerSource = File.ReadAllText(Path.Combine("src", "LiveDialogueTranslator.App", "Services", "Localizer.cs"));
 
+    Assert.Contains("x:Name=\"TranslationEnabledCheck\"", xaml);
+    Assert.Contains("x:Name=\"TranslationConfigurationPanel\"", xaml);
     Assert.Contains("x:Name=\"TranslateProviderBox\"", xaml);
     Assert.Contains("x:Name=\"TranslationProviderAvailabilityText\"", xaml);
     Assert.Contains("x:Name=\"TranslateProviderOpenAIItem\" Content=\"OpenAI\" Tag=\"OpenAI\" IsEnabled=\"False\"", xaml);
@@ -1218,12 +1220,19 @@ static void MainWindowExposesTranslationProviderAndDisplayModes()
     Assert.Contains("settings.TranslateProvider = ParseSelectedTag(TranslateProviderBox, settings.TranslateProvider);", source);
     Assert.Contains("settings.TargetLanguage = ParseSelectedTag(TargetLanguageBox, settings.TargetLanguage);", source);
     Assert.Contains("settings.CaptionDisplayMode = SelectedCaptionDisplayMode();", source);
+    Assert.Contains("settings.TranslationEnabled = TranslationEnabledCheck.IsChecked == true;", source);
+    Assert.Contains("if (!settings.TranslationEnabled || settings.CaptionDisplayMode == CaptionDisplayMode.Original)", source);
+    Assert.Contains("TranslationConfigurationPanel.IsEnabled = enabled;", source);
+    Assert.Contains("DisplayTranslatedRadio.IsEnabled = enabled;", source);
+    Assert.Contains("DisplayBothRadio.IsEnabled = enabled;", source);
+    Assert.Contains("public bool TranslationEnabled", settings);
     Assert.Contains("public TranslateProvider TranslateProvider", settings);
     Assert.Contains("public CaptionDisplayMode CaptionDisplayMode", settings);
     Assert.Contains("settings.TranslateProvider != TranslateProvider.Google", settingsStore);
     Assert.Contains("TranslateApi", localizerSource);
     Assert.Contains("TargetLanguage", localizerSource);
     Assert.Contains("DisplayBoth", localizerSource);
+    Assert.Contains("TranslationDisabled", localizerSource);
 }
 
 static void MainWindowAppliesTargetTranslationLanguageImmediately()
