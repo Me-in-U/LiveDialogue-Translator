@@ -18,7 +18,9 @@ import unicodedata
 import warnings
 import wave
 import importlib
+import importlib.metadata
 import importlib.util
+import sysconfig
 from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -221,10 +223,14 @@ def apply_asr_engine_site_path() -> None:
     if not site:
         return
 
-    preload_base_runtime_modules()
-
     site_paths = [Path(entry) for entry in site.split(os.pathsep) if entry.strip()]
-    quarantine_asr_engine_optional_packages(site_paths)
+    isolated_whisperx_runtime = (
+        os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE", "").strip().lower()
+        == "whisperx"
+    )
+    if not isolated_whisperx_runtime:
+        preload_base_runtime_modules()
+        quarantine_asr_engine_optional_packages(site_paths)
     for site_path in reversed(site_paths):
         site_text = str(site_path)
         sys.path = [entry for entry in sys.path if entry != site_text]
@@ -314,6 +320,10 @@ def apply_torchaudio_compatibility_shims() -> None:
 
     if not hasattr(torchaudio, "set_audio_backend"):
         setattr(torchaudio, "set_audio_backend", lambda *_args, **_kwargs: None)
+    if not hasattr(torchaudio, "get_audio_backend"):
+        setattr(torchaudio, "get_audio_backend", lambda *_args, **_kwargs: "soundfile")
+    if not hasattr(torchaudio, "list_audio_backends"):
+        setattr(torchaudio, "list_audio_backends", lambda *_args, **_kwargs: ["soundfile"])
 
 
 def patch_speechbrain_lazy_module_inspection() -> None:
@@ -766,6 +776,28 @@ class LocalSpeechEngine:
         )
 
     def ensure_loaded(self) -> None:
+        combination_error = unsupported_model_combination_error(
+            self.config.asr_engine,
+            self.config.diarization_enabled,
+            self.config.diarization_model,
+            self.config.speech_separation_model,
+        )
+        if combination_error:
+            self.whisper_model = False
+            self.last_stt_error = combination_error
+            self.last_speech_separation_error = combination_error
+            if self._uses_whisperlivekit_asr():
+                self.whisperlivekit_engine = False
+            if self._uses_whisperx_asr():
+                self.whisperx_engine = False
+            emit({
+                "type": "error",
+                "code": "unsupported_model_combination",
+                "message": combination_error,
+                "recoverable": True,
+            })
+            return
+
         if self._uses_qwen_asr() and self.qwen_model is None:
             try:
                 use_aligner = self._qwen_aligner_enabled()
@@ -4842,7 +4874,41 @@ def check_environment(models_dir: Path) -> int:
     diarization_model = normalize_diarization_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_DIARIZATION_MODEL"))
     speech_separation_model = normalize_speech_separation_model(os.environ.get("LIVE_DIALOGUE_TRANSLATOR_SPEECH_SEPARATION_MODEL"))
     materialize_model_cache_links(models_dir, stt_model)
-    qwen_runtime_error = qwen_asr_runtime_error() if asr_engine == "qwen3_asr_diarization" else None
+    package_lock_error = locked_package_error()
+    model_combination_error = unsupported_model_combination_error(
+        asr_engine,
+        diarization_enabled,
+        diarization_model,
+        speech_separation_model,
+    )
+    faster_whisper_error = import_attribute_error("faster_whisper", "WhisperModel") if package_lock_error is None else package_lock_error
+    qwen_runtime_error = qwen_asr_runtime_error() if asr_engine == "qwen3_asr_diarization" and package_lock_error is None and model_combination_error is None else package_lock_error
+    whisperlivekit_error = (
+        whisperlivekit_runtime_error(diarization_model == "sortformer")
+        if package_lock_error is None and model_combination_error is None and (asr_engine == "whisperlivekit_sortformer" or (diarization_enabled and diarization_model == "sortformer"))
+        else package_lock_error
+    )
+    whisperx_error = whisperx_runtime_error() if asr_engine == "whisperx" and package_lock_error is None and model_combination_error is None else package_lock_error
+    diarization_runtime_error = (
+        selected_diarization_runtime_error(diarization_model)
+        if diarization_enabled and speech_separation_model == "none" and package_lock_error is None and model_combination_error is None
+        else package_lock_error
+    )
+    separation_runtime_error = (
+        selected_speech_separation_runtime_error(speech_separation_model)
+        if speech_separation_model != "none" and package_lock_error is None and model_combination_error is None
+        else package_lock_error
+    )
+    runtime_compatibility_error = next((error for error in (
+        package_lock_error,
+        model_combination_error,
+        qwen_runtime_error if asr_engine == "qwen3_asr_diarization" else None,
+        whisperlivekit_error if asr_engine == "whisperlivekit_sortformer" or (diarization_enabled and diarization_model == "sortformer") else None,
+        whisperx_error if asr_engine == "whisperx" else None,
+        diarization_runtime_error if diarization_enabled and speech_separation_model == "none" else None,
+        separation_runtime_error if speech_separation_model != "none" else None,
+        faster_whisper_error,
+    ) if error), None)
     qwen_files_ready = (
         qwen_model_files_prepared(
             models_dir,
@@ -4853,31 +4919,35 @@ def check_environment(models_dir: Path) -> int:
         else True
     )
     packages = {
-        "faster_whisper": has_module("faster_whisper"),
-        "pyannote_audio": has_module("pyannote.audio"),
-        "diart": has_module("diart"),
-        "torch": has_module("torch"),
+        "faster_whisper": has_module("faster_whisper") and faster_whisper_error is None,
+        "pyannote_audio": has_module("pyannote.audio") and (diarization_model not in {"pyannote_community", "diart"} or diarization_runtime_error is None),
+        "diart": has_module("diart") and (diarization_model != "diart" or diarization_runtime_error is None),
+        "torch": has_module("torch") and package_lock_error is None,
         "qwen_asr": has_module("qwen_asr") and qwen_runtime_error is None,
-        "whisperlivekit": has_module("whisperlivekit"),
-        "whisperx": has_module("whisperx"),
-        "clearvoice": has_module("clearvoice"),
-        "speechbrain": has_module("speechbrain"),
+        "whisperlivekit": has_module("whisperlivekit") and whisperlivekit_error is None,
+        "whisperx": has_module("whisperx") and whisperx_error is None,
+        "clearvoice": has_module("clearvoice") and (speech_separation_model != "mossformer2_ss_16k" or separation_runtime_error is None),
+        "speechbrain": has_module("speechbrain") and (speech_separation_model != "sepformer_whamr16k" or separation_runtime_error is None),
     }
     whisper_root = models_dir / "whisper"
     if asr_engine == "qwen3_asr_diarization":
         model_prepared = packages["qwen_asr"] and qwen_files_ready
     elif asr_engine == "whisperlivekit_sortformer":
         model_prepared = packages["whisperlivekit"]
+    elif asr_engine == "whisperx":
+        model_prepared = packages["whisperx"] and (any(whisper_root.rglob("*")) if whisper_root.exists() else False)
     else:
         model_prepared = any(whisper_root.rglob("*")) if whisper_root.exists() else False
     stt_model_loadable = False
-    stt_model_error = qwen_runtime_error
+    stt_model_error = runtime_compatibility_error
     if asr_engine == "qwen3_asr_diarization" and packages["qwen_asr"] and not qwen_files_ready:
         stt_model_error = "Qwen3-ASR model files are incomplete and must be downloaded."
     if asr_engine == "qwen3_asr_diarization":
         stt_model_loadable = packages["qwen_asr"] and qwen_files_ready
     elif asr_engine == "whisperlivekit_sortformer":
         stt_model_loadable = packages["whisperlivekit"]
+    elif asr_engine == "whisperx":
+        stt_model_loadable = packages["whisperx"] and model_prepared
     elif packages["faster_whisper"] and model_prepared:
         try:
             from faster_whisper import WhisperModel
@@ -4906,6 +4976,8 @@ def check_environment(models_dir: Path) -> int:
         "diarizationModelPrepared": is_diarization_model_prepared(models_dir, diarization_model, diarization_enabled),
         "speechSeparationAvailable": is_speech_separation_package_available(speech_separation_model, packages),
         "speechSeparationModelPrepared": is_speech_separation_model_prepared(models_dir, speech_separation_model),
+        "packageLockError": package_lock_error,
+        "runtimeCompatibilityError": runtime_compatibility_error,
         "sttModelError": stt_model_error,
         "sttModel": stt_model,
     }, ensure_ascii=False), flush=True)
@@ -4922,6 +4994,126 @@ def qwen_asr_runtime_error() -> str | None:
     except Exception as exc:
         return str(exc)
     return None
+
+
+def unsupported_model_combination_error(
+    asr_engine: str,
+    diarization_enabled: bool,
+    diarization_model: str,
+    speech_separation_model: str,
+) -> str | None:
+    if speech_separation_model != "none" and asr_engine == "whisperlivekit_sortformer":
+        return "Speech separation cannot be combined with the stateful WhisperLiveKit streaming session."
+    if speech_separation_model != "none" and asr_engine == "whisperx":
+        return "Speech separation cannot be combined with the isolated WhisperX PyTorch 2.8 runtime."
+    if diarization_enabled and diarization_model == "sortformer" and asr_engine == "whisperx":
+        return "Sortformer cannot be combined with the isolated WhisperX PyTorch and Lightning runtime."
+    return None
+
+
+def whisperlivekit_runtime_error(require_sortformer: bool) -> str | None:
+    error = import_attribute_error("whisperlivekit", "TranscriptionEngine")
+    if error or not require_sortformer:
+        return error
+    return import_attribute_error(
+        "whisperlivekit.diarization.sortformer_backend",
+        "SortformerDiarization",
+    )
+
+
+def whisperx_runtime_error() -> str | None:
+    suppress_torchcodec_warning()
+    apply_torchaudio_compatibility_shims()
+    patch_speechbrain_lazy_module_inspection()
+    return import_attribute_error("whisperx", "load_model")
+
+
+def selected_diarization_runtime_error(model: str) -> str | None:
+    suppress_torchcodec_warning()
+    apply_torchaudio_compatibility_shims()
+    if model == "sortformer":
+        return whisperlivekit_runtime_error(True)
+    if model == "diart":
+        error = import_attribute_error("diart", "SpeakerDiarization")
+        return error or import_attribute_error("pyannote.audio", "Pipeline")
+    return import_attribute_error("pyannote.audio", "Pipeline")
+
+
+def selected_speech_separation_runtime_error(model: str) -> str | None:
+    if model == "mossformer2_ss_16k":
+        return import_attribute_error("clearvoice", "ClearVoice")
+    if model == "sepformer_whamr16k":
+        apply_torchaudio_compatibility_shims()
+        patch_speechbrain_lazy_module_inspection()
+        return import_attribute_error(
+            "speechbrain.inference.separation",
+            "SepformerSeparation",
+        )
+    return None
+
+
+def import_attribute_error(module_name: str, attribute_name: str) -> str | None:
+    try:
+        module = importlib.import_module(module_name)
+        getattr(module, attribute_name)
+    except Exception as exc:
+        return f"{module_name}: {exc}"
+    return None
+
+
+def locked_package_error() -> str | None:
+    lock_path = WORKER_DIR / "package-lock.json"
+    if not lock_path.is_file():
+        return f"Package lock file is missing: {lock_path}"
+
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        scopes = lock["scopes"]
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        return f"Package lock file is invalid: {exc}"
+
+    base_error = locked_scope_error("base", Path(sysconfig.get_paths()["purelib"]), scopes)
+    if base_error:
+        return base_error
+
+    for site_path in active_package_site_paths():
+        scope = site_path.parent.name
+        scope_error = locked_scope_error(scope, site_path, scopes)
+        if scope_error:
+            return scope_error
+    return None
+
+
+def active_package_site_paths() -> list[Path]:
+    value = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE_SITE", "").strip()
+    return [Path(entry) for entry in value.split(os.pathsep) if entry.strip()]
+
+
+def locked_scope_error(scope: str, package_path: Path, scopes: dict[str, Any]) -> str | None:
+    expected_versions = scopes.get(scope)
+    if not isinstance(expected_versions, dict):
+        return f"Package lock scope is missing: {scope}"
+    if not package_path.is_dir():
+        return f"Package directory is missing for {scope}: {package_path}"
+
+    installed = {
+        normalize_distribution_name(distribution.metadata.get("Name", "")): distribution.version
+        for distribution in importlib.metadata.distributions(path=[str(package_path)])
+        if distribution.metadata.get("Name")
+    }
+    for package_name, expected_version in expected_versions.items():
+        actual_version = installed.get(normalize_distribution_name(package_name))
+        if actual_version is None:
+            return f"Locked package is missing in {scope}: {package_name}=={expected_version}"
+        expected_text = str(expected_version)
+        comparable_actual = actual_version if "+" in expected_text else actual_version.split("+", 1)[0]
+        if comparable_actual != expected_text:
+            return f"Locked package mismatch in {scope}: {package_name}=={actual_version}, expected {expected_version}"
+    return None
+
+
+def normalize_distribution_name(value: str) -> str:
+    return value.strip().lower().replace("_", "-").replace(".", "-")
 
 
 def is_speech_separation_package_available(model: str, packages: dict[str, bool]) -> bool:

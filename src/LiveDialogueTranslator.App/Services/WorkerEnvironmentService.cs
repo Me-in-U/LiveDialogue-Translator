@@ -250,18 +250,31 @@ public sealed class WorkerEnvironmentService
             }
 
             var targetDirectory = paths.AsrPackageDirectory(engine);
-            Directory.CreateDirectory(targetDirectory);
-            Report(L("InstallingAsrEnginePackages"), L("AsrEnginePackagesCanTakeMinutes"), 0.36);
-            var result = await RunProcessAsync(
-                paths.PythonExecutablePath,
-                PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, targetDirectory),
-                settings,
-                token,
-                progressTitle: L("InstallingAsrEnginePackages"));
-
-            if (result.ExitCode != 0)
+            var stagingDirectory = PackageInstallStamp.CreateStagingDirectory(targetDirectory);
+            try
             {
-                throw new InvalidOperationException($"{L("PythonPackageInstallFailed")}{Environment.NewLine}{result.StdErr}{Environment.NewLine}{result.StdOut}");
+                Report(L("InstallingAsrEnginePackages"), L("AsrEnginePackagesCanTakeMinutes"), 0.36);
+                var result = await RunProcessAsync(
+                    paths.PythonExecutablePath,
+                    PythonPipCommands.InstallRequirementsToTargetArguments(
+                        requirementsPath,
+                        stagingDirectory,
+                        includeCudaTorchIndex: engine == AsrEngine.WhisperX),
+                    settings,
+                    token,
+                    progressTitle: L("InstallingAsrEnginePackages"));
+
+                if (result.ExitCode != 0)
+                {
+                    throw new InvalidOperationException($"{L("PythonPackageInstallFailed")}{Environment.NewLine}{result.StdErr}{Environment.NewLine}{result.StdOut}");
+                }
+
+                PackageInstallStamp.MarkCurrent(requirementsPath, stagingDirectory);
+                PackageInstallStamp.CommitStagingDirectory(stagingDirectory, targetDirectory);
+            }
+            finally
+            {
+                PackageInstallStamp.DeleteStagingDirectory(stagingDirectory, targetDirectory);
             }
         }
     }
@@ -283,19 +296,29 @@ public sealed class WorkerEnvironmentService
         }
 
         var targetDirectory = paths.SpeechSeparationPackageDirectory(model);
-        Directory.CreateDirectory(targetDirectory);
-        Report(L("InstallingSpeechSeparationPackages"), L("SpeechSeparationPackagesCanTakeMinutes"), 0.4);
-        var result = await RunProcessAsync(
-            paths.PythonExecutablePath,
-            PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, targetDirectory),
-            settings,
-            token,
-            progressTitle: L("InstallingSpeechSeparationPackages"),
-            speechSeparationModel: model);
-
-        if (result.ExitCode != 0)
+        var stagingDirectory = PackageInstallStamp.CreateStagingDirectory(targetDirectory);
+        try
         {
-            throw new InvalidOperationException($"{L("PythonPackageInstallFailed")}{Environment.NewLine}{result.StdErr}{Environment.NewLine}{result.StdOut}");
+            Report(L("InstallingSpeechSeparationPackages"), L("SpeechSeparationPackagesCanTakeMinutes"), 0.4);
+            var result = await RunProcessAsync(
+                paths.PythonExecutablePath,
+                PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, stagingDirectory),
+                settings,
+                token,
+                progressTitle: L("InstallingSpeechSeparationPackages"),
+                speechSeparationModel: model);
+
+            if (result.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"{L("PythonPackageInstallFailed")}{Environment.NewLine}{result.StdErr}{Environment.NewLine}{result.StdOut}");
+            }
+
+            PackageInstallStamp.MarkCurrent(requirementsPath, stagingDirectory);
+            PackageInstallStamp.CommitStagingDirectory(stagingDirectory, targetDirectory);
+        }
+        finally
+        {
+            PackageInstallStamp.DeleteStagingDirectory(stagingDirectory, targetDirectory);
         }
     }
 

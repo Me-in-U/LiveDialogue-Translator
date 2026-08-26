@@ -2,3 +2,8 @@ clearvoice==0.1.2
 torch==2.11.0
 torchaudio==2.11.0
 huggingface-hub==0.36.2
+numpy==1.26.4
+librosa==0.10.2.post1
+scipy==1.17.1
+soundfile==0.12.1
+opencv-python==4.10.0.84

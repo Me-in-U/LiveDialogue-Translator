@@ -19,12 +19,18 @@ public static class SpeechSeparationEnvironment
         }
 
         var separationSite = paths.SpeechSeparationPackageDirectory(model);
+        var requirementsPath = RequirementsPath(model);
+        if (!PackageInstallStamp.IsCurrent(requirementsPath, separationSite))
+        {
+            return;
+        }
+
         var existing = environment.TryGetValue("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE_SITE", out var value)
             ? value
             : null;
         environment["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE_SITE"] = string.IsNullOrWhiteSpace(existing)
             ? separationSite
-            : string.Join(Path.PathSeparator, existing, separationSite);
+            : string.Join(Path.PathSeparator, separationSite, existing);
     }
 
     public static string RequirementsPath(SpeechSeparationModel model)

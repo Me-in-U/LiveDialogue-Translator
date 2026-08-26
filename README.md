@@ -137,7 +137,9 @@ credible stem is present, the worker avoids duplicate captions. Separation is
 applied to system audio and replaces acoustic diarization for that capture;
 microphone input keeps its dedicated microphone label. WhisperLiveKit is not
 offered with separation because its stateful streaming ASR session cannot
-safely consume two independent streams.
+safely consume two independent streams. WhisperX is also excluded because its
+isolated PyTorch 2.8 runtime cannot be mixed with the PyTorch 2.11 separation
+runtime.
 
 RE-SepFormer, SkiM, SepReformer, SR-CorrNet, and TF-GridNet are intentionally
 not exposed. The current app does not have a reproducible Windows Python 3.11,
@@ -186,16 +188,28 @@ path.
 | WhisperLiveKit default (`large-v3-turbo`) | Sortformer | 12 CPU cores, 32 GB RAM | 10 GB VRAM, 24 GB RAM | Native WhisperLiveKit + Sortformer streaming path. |
 | WhisperX `tiny/base/small` | Community-1 | 8 CPU cores, 16 GB RAM | 8 GB VRAM, 16 GB RAM | Word alignment and diarization both add overhead. |
 | WhisperX `tiny/base/small` | Diart | 8 CPU cores, 16 GB RAM | 8 GB VRAM, 16 GB RAM | Good if word timestamps matter more than lowest latency. |
-| WhisperX `tiny/base/small` | Sortformer | 8 CPU cores, 24 GB RAM | 10 GB VRAM, 24 GB RAM | Sortformer adds the WhisperLiveKit runtime package. |
 | WhisperX `medium/large-v3/large-v3-turbo` | Community-1 | 12 CPU cores, 32 GB RAM | 12 GB VRAM, 32 GB RAM | Reduce WhisperX batch size if memory is tight. |
 | WhisperX `medium/large-v3/large-v3-turbo` | Diart | 12 CPU cores, 32 GB RAM | 12 GB VRAM, 32 GB RAM | Heavy but reasonable on 12 GB+ NVIDIA GPUs. |
-| WhisperX `medium/large-v3/large-v3-turbo` | Sortformer | 16 CPU cores, 48 GB RAM | 12 GB VRAM, 32 GB RAM | 16 GB VRAM is preferred for long sessions. |
+
+WhisperX with Sortformer is intentionally disabled. Their isolated PyTorch and
+Lightning stacks conflict at runtime, so the settings page automatically uses
+Community-1 instead. WhisperLiveKit with overlap separation and WhisperX with
+either overlap separation model are also disabled.
 
 For a general-purpose Windows desktop setup using CUDA, the practical baseline
 is a modern 8-core CPU, 32 GB system RAM, and an NVIDIA GPU with 12 GB VRAM.
 That class of machine can cover every selectable combination, although
-Qwen3-ASR `1.7B` plus Sortformer or WhisperX large plus Sortformer benefits
-from 16 GB VRAM.
+Qwen3-ASR `1.7B` plus Sortformer benefits from 16 GB VRAM.
+
+### Reproducible Python runtimes
+
+Every supported backend has exact top-level and compatibility-critical package
+versions. `worker/package-lock.json` is checked before model loading, including
+the CUDA build suffix for WhisperX. A missing or mismatched package makes the
+app rebuild that isolated runtime in a staging directory, validate it, and then
+replace the previous runtime. This prevents a partial install or a later pip
+resolver change from silently mixing Qwen3-ASR, WhisperLiveKit, WhisperX, or
+overlap-separation dependencies.
 
 ## Quick Start
 

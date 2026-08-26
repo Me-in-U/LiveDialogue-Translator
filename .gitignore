@@ -20,7 +20,7 @@ publish/
 
 # Local SDK, runtime, model, and cache directories
 .dotnet-sdk/
-runtime/
+/runtime/
 models/
 cache/
 .playwright-mcp/

@@ -1553,7 +1553,22 @@ public partial class MainWindow : Window
 
             AddSpeakerProcessingItem(L("PyannoteCommunity"), "PyannoteCommunity", tooltip: L("SpeakerModelCommunityDescription"));
             AddSpeakerProcessingItem(L("DiartRealtime"), "Diart", tooltip: L("SpeakerModelDiartDescription"));
-            AddSpeakerProcessingItem(L("Sortformer"), "Sortformer", tooltip: L("SpeakerModelSortformerDescription"));
+            var sortformerSupported = SpeakerProcessingCompatibility.IsDiarizationSupported(
+                asrEngine,
+                DiarizationModel.Sortformer);
+            AddSpeakerProcessingItem(
+                sortformerSupported
+                    ? L("Sortformer")
+                    : LF("SpeechSeparationUnavailableItem", L("Sortformer")),
+                "Sortformer",
+                sortformerSupported,
+                sortformerSupported
+                    ? L("SpeakerModelSortformerDescription")
+                    : L("SpeakerModelSortformerWhisperXUnavailable"));
+            if (!sortformerSupported && requestedChoice == "Sortformer")
+            {
+                requestedChoice = "PyannoteCommunity";
+            }
             SelectByTag(SpeakerProcessingModelBox, requestedChoice);
             if (SpeakerProcessingModelBox.SelectedItem is null)
             {
@@ -1650,7 +1665,9 @@ public partial class MainWindow : Window
                 case "Sortformer":
                     SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.None.ToString());
                     DiarizationCheck.IsChecked = true;
-                    SelectDiarizationModel(DiarizationModel.Sortformer);
+                    SelectDiarizationModel(SpeakerProcessingCompatibility.ResolveDiarization(
+                        ParseSelectedTag(AsrEngineBox, settings.AsrEngine),
+                        DiarizationModel.Sortformer));
                     break;
                 default:
                     SelectByTag(SpeechSeparationModelBox, SpeechSeparationModel.None.ToString());
@@ -1867,6 +1884,7 @@ public partial class MainWindow : Window
         {
             SpeechSeparationBlockReason.CpuMode => L("SpeechSeparationReasonCpu"),
             SpeechSeparationBlockReason.StreamingAsr => L("SpeechSeparationReasonStreamingAsr"),
+            SpeechSeparationBlockReason.IsolatedAsrRuntime => L("SpeechSeparationReasonIsolatedAsr"),
             SpeechSeparationBlockReason.NvidiaGpuRequired => L("SpeechSeparationReasonNoGpu"),
             SpeechSeparationBlockReason.InsufficientGpuMemory => LF(
                 "SpeechSeparationInsufficientVram",
@@ -1903,6 +1921,11 @@ public partial class MainWindow : Window
         if (asrEngine == AsrEngine.WhisperLiveKitSortformer)
         {
             return L("SpeechSeparationReasonStreamingAsr");
+        }
+
+        if (asrEngine == AsrEngine.WhisperX)
+        {
+            return L("SpeechSeparationReasonIsolatedAsr");
         }
 
         if (!hardwareProfile.HasNvidiaGpu)
@@ -2356,7 +2379,17 @@ public partial class MainWindow : Window
         DiarizationModelPanel.Visibility = Visibility.Visible;
         DiarizationCommunityRadio.IsEnabled = true;
         DiarizationDiartRadio.IsEnabled = true;
-        DiarizationSortformerRadio.IsEnabled = true;
+        var sortformerSupported = SpeakerProcessingCompatibility.IsDiarizationSupported(
+            engine,
+            DiarizationModel.Sortformer);
+        DiarizationSortformerRadio.IsEnabled = sortformerSupported;
+        DiarizationSortformerRadio.ToolTip = sortformerSupported
+            ? L("SpeakerModelSortformerDescription")
+            : L("SpeakerModelSortformerWhisperXUnavailable");
+        if (normalizeSelection && !sortformerSupported && DiarizationSortformerRadio.IsChecked == true)
+        {
+            SelectDiarizationModel(DiarizationModel.PyannoteCommunity);
+        }
     }
 
     private void SyncSttModelItemsForEngine(AsrEngine engine, bool normalizeSelection)
@@ -2402,6 +2435,11 @@ public partial class MainWindow : Window
 
     private void NormalizeAsrEngineSettings()
     {
+        settings.DiarizationModel = SpeakerProcessingCompatibility.ResolveDiarization(
+            settings.AsrEngine,
+            settings.DiarizationModel);
+        SelectDiarizationModel(settings.DiarizationModel);
+
         if (settings.AsrEngine == AsrEngine.None && !IsFasterWhisperSttModel(settings.SttModel))
         {
             settings.SttModel = DefaultWhisperModel;

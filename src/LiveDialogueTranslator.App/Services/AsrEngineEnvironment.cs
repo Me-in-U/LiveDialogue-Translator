@@ -28,7 +28,13 @@ public static class AsrEngineEnvironment
         var packageDirectories = OrderAsrPackageEngines(
                 RequiredAsrEngines(engine, diarizationModel, diarizationEnabled),
                 engine)
-            .Select(paths.AsrPackageDirectory)
+            .Select(candidate => new
+            {
+                RequirementsPath = RequirementsPath(candidate),
+                PackageDirectory = paths.AsrPackageDirectory(candidate)
+            })
+            .Where(candidate => PackageInstallStamp.IsCurrent(candidate.RequirementsPath, candidate.PackageDirectory))
+            .Select(candidate => candidate.PackageDirectory)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (packageDirectories.Length == 0)

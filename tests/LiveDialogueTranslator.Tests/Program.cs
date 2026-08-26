@@ -130,6 +130,7 @@ var tests = new (string Name, Action Body)[]
     ("startup planner installs selected ASR engine packages", StartupPlannerInstallsSelectedAsrEnginePackages),
     ("speech separation advisor recommends models by detected hardware", SpeechSeparationAdvisorRecommendsModelsByHardware),
     ("speech separation advisor rejects unsupported runtime paths", SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths),
+    ("speaker processing compatibility blocks verified runtime conflicts", SpeakerProcessingCompatibilityBlocksVerifiedRuntimeConflicts),
     ("startup planner installs and prepares selected separation model", StartupPlannerInstallsAndPreparesSpeechSeparation),
     ("main window exposes automatic hardware based separation selection", MainWindowExposesAutomaticHardwareBasedSpeechSeparation),
     ("settings page shows unified speaker processing and model details", SettingsPageSeparatesRecognitionFromSpeakerProcessing),
@@ -772,11 +773,16 @@ static void PythonPipCommandsSuppressScriptLocationWarnings()
 static void PythonPipCommandsInstallCudaTorchFromCu128Index()
 {
     var arguments = PythonPipCommands.InstallCudaTorchArguments();
+    var whisperXArguments = PythonPipCommands.InstallRequirementsToTargetArguments(
+        "requirements-whisperx.txt",
+        "whisperx-site",
+        includeCudaTorchIndex: true);
 
     Assert.Contains("--index-url https://download.pytorch.org/whl/cu128", arguments);
     Assert.Contains("torch==2.11.0+cu128", arguments);
     Assert.Contains("torchaudio==2.11.0+cu128", arguments);
     Assert.Contains("--upgrade", arguments);
+    Assert.Contains("--extra-index-url https://download.pytorch.org/whl/cu128", whisperXArguments);
 }
 
 static void PythonPipCommandsInstallDiartWithoutDependencyResolverConflict()
@@ -797,6 +803,8 @@ static void WorkerRequirementsPinPyannoteBeforeTorchcodecDependencyLine()
     Assert.Contains("torchaudio==2.11.0", requirements);
     Assert.Contains("torchcodec==0.11.1", requirements);
     Assert.Contains("huggingface-hub==0.36.2", requirements);
+    Assert.Contains("faster-whisper==1.2.1", requirements);
+    Assert.Contains("numpy==2.4.6", requirements);
     Assert.True(!requirements.Contains("pyannote.audio>=", StringComparison.Ordinal), "pyannote.audio must stay aligned with the Community-1 model API.");
     Assert.True(!requirements.Contains("torch>=", StringComparison.Ordinal), "torch must stay aligned with torchaudio and torchcodec.");
     Assert.True(!requirements.Contains("torchaudio>=", StringComparison.Ordinal), "torchaudio must stay aligned with torch.");
@@ -807,11 +815,25 @@ static void WorkerRequirementsPinPyannoteBeforeTorchcodecDependencyLine()
     Assert.Contains("qwen-asr==0.0.6", qwenRequirements);
     Assert.Contains("transformers==4.57.6", qwenRequirements);
     Assert.Contains("huggingface-hub==0.36.2", qwenRequirements);
+    Assert.Contains("torch==2.11.0", qwenRequirements);
     Assert.Contains("Qwen/Qwen3-ASR-1.7B", qwenEnv);
     Assert.Contains("Qwen/Qwen3-ASR-0.6B", qwenEnv);
     Assert.Contains("Qwen/Qwen3-ForcedAligner-0.6B", qwenEnv);
-    Assert.Contains("whisperlivekit", wlkRequirements);
+    Assert.Contains("whisperlivekit[diarization-sortformer]==0.2.24", wlkRequirements);
     Assert.Contains("diarization-sortformer", wlkRequirements);
+    Assert.Contains("transformers==5.15.1", wlkRequirements);
+    Assert.Contains("torch==2.11.0", wlkRequirements);
+    var whisperXRequirements = File.ReadAllText(Path.Combine("worker", "requirements-whisperx.txt"));
+    Assert.Contains("torch==2.8.0+cu128", whisperXRequirements);
+    Assert.Contains("torchaudio==2.8.0+cu128", whisperXRequirements);
+    Assert.Contains("torchvision==0.23.0+cu128", whisperXRequirements);
+
+    var packageLock = File.ReadAllText(Path.Combine("worker", "package-lock.json"));
+    Assert.Contains("\"qwen3-asr\"", packageLock);
+    Assert.Contains("\"whisperlivekit-sortformer\"", packageLock);
+    Assert.Contains("\"whisperx\"", packageLock);
+    Assert.Contains("\"mossformer2-ss-16k\"", packageLock);
+    Assert.Contains("\"sepformer-whamr16k\"", packageLock);
 }
 
 static void PythonProcessEnvironmentUsesUtf8AndPlainPipOutput()
@@ -894,6 +916,7 @@ static void AppPublishIncludesWorkerSupportModules()
 
     Assert.Contains("..\\..\\worker\\speaker_worker.py", project);
     Assert.Contains("..\\..\\worker\\diarization_state.py", project);
+    Assert.Contains("..\\..\\worker\\package-lock.json", project);
 }
 
 static void CaptionPageUsesOverlayStyleSpeakerCard()
@@ -1741,7 +1764,8 @@ static void AsrEngineEnvironmentPrioritizesSelectedEngineDependencySite()
 
     Assert.Contains("OrderAsrPackageEngines", source);
     Assert.Contains("candidate == selectedEngine ? 0 : 1", source);
-    Assert.Contains(".Select(paths.AsrPackageDirectory)", source);
+    Assert.Contains("PackageInstallStamp.IsCurrent", source);
+    Assert.Contains("PackageDirectory = paths.AsrPackageDirectory(candidate)", source);
 }
 
 static void OverlayGroupsCaptionsBySpeakerAndFadesInactiveSpeakers()
@@ -2347,7 +2371,7 @@ static void SpeechSeparationAdvisorRecommendsModelsByHardware()
     var lowerMemory = highMemory with { GpuMemoryBytes = 8 * SpeechSeparationAdvisor.GiB };
 
     var highRecommendation = SpeechSeparationAdvisor.Recommend(highMemory, ComputeMode.Auto, AsrEngine.None);
-    var lowerRecommendation = SpeechSeparationAdvisor.Recommend(lowerMemory, ComputeMode.Cuda, AsrEngine.WhisperX);
+    var lowerRecommendation = SpeechSeparationAdvisor.Recommend(lowerMemory, ComputeMode.Cuda, AsrEngine.None);
     var qwenHeavyRecommendation = SpeechSeparationAdvisor.Recommend(
         highMemory,
         ComputeMode.Cuda,
@@ -2388,12 +2412,39 @@ static void SpeechSeparationAdvisorRejectsUnsupportedRuntimePaths()
         true);
     var cpu = SpeechSeparationAdvisor.Recommend(profile, ComputeMode.Cpu, AsrEngine.None);
     var streaming = SpeechSeparationAdvisor.Recommend(profile, ComputeMode.Cuda, AsrEngine.WhisperLiveKitSortformer);
+    var isolated = SpeechSeparationAdvisor.Recommend(profile, ComputeMode.Cuda, AsrEngine.WhisperX);
     var noGpu = SpeechSeparationAdvisor.Recommend(profile with { GpuName = null, NvidiaDriverAvailable = false }, ComputeMode.Auto, AsrEngine.None);
 
     Assert.Equal(SpeechSeparationModel.None, cpu.Model);
     Assert.Equal(SpeechSeparationModel.None, streaming.Model);
+    Assert.Equal(SpeechSeparationModel.None, isolated.Model);
+    Assert.Equal(
+        SpeechSeparationBlockReason.IsolatedAsrRuntime,
+        SpeechSeparationAdvisor.Assess(
+            profile,
+            ComputeMode.Cuda,
+            AsrEngine.WhisperX,
+            SpeechSeparationModel.MossFormer2).BlockReason);
     Assert.Equal(SpeechSeparationModel.None, noGpu.Model);
     Assert.Equal(SpeechSeparationModel.None, SpeechSeparationAdvisor.Resolve(SpeechSeparationModel.MossFormer2, noGpu));
+}
+
+static void SpeakerProcessingCompatibilityBlocksVerifiedRuntimeConflicts()
+{
+    Assert.True(SpeakerProcessingCompatibility.IsDiarizationSupported(
+        AsrEngine.Qwen3Asr,
+        DiarizationModel.Sortformer), "Qwen3-ASR must support Sortformer.");
+    Assert.True(SpeakerProcessingCompatibility.IsDiarizationSupported(
+        AsrEngine.WhisperLiveKitSortformer,
+        DiarizationModel.Sortformer), "WhisperLiveKit must support Sortformer.");
+    Assert.True(!SpeakerProcessingCompatibility.IsDiarizationSupported(
+        AsrEngine.WhisperX,
+        DiarizationModel.Sortformer), "WhisperX must reject Sortformer.");
+    Assert.Equal(
+        DiarizationModel.PyannoteCommunity,
+        SpeakerProcessingCompatibility.ResolveDiarization(
+            AsrEngine.WhisperX,
+            DiarizationModel.Sortformer));
 }
 
 static void StartupPlannerInstallsAndPreparesSpeechSeparation()
@@ -2489,9 +2540,12 @@ static void SpeechSeparationRequirementsOnlyExposeIntegratedModels()
     Assert.Contains("speechbrain==1.0.3", sep);
     Assert.Contains("huggingface-hub==0.36.2", moss);
     Assert.Contains("huggingface-hub==0.36.2", sep);
+    Assert.Contains("numpy==1.26.4", moss);
+    Assert.Contains("numpy==1.26.4", sep);
     Assert.Contains("requirements-speech-separation-mossformer2.txt", environment);
     Assert.Contains("requirements-speech-separation-sepformer.txt", environment);
-    Assert.Contains("string.Join(Path.PathSeparator, existing, separationSite)", environment);
+    Assert.Contains("PackageInstallStamp.IsCurrent", environment);
+    Assert.Contains("string.Join(Path.PathSeparator, separationSite, existing)", environment);
     Assert.True(!environment.Contains("RE-SepFormer", StringComparison.OrdinalIgnoreCase), "Unintegrated research models must not appear as selectable runtimes.");
     Assert.True(!environment.Contains("TF-GridNet", StringComparison.OrdinalIgnoreCase), "Unintegrated research models must not appear as selectable runtimes.");
 }

@@ -42,6 +42,7 @@ public enum SpeechSeparationBlockReason
     None,
     CpuMode,
     StreamingAsr,
+    IsolatedAsrRuntime,
     NvidiaGpuRequired,
     InsufficientGpuMemory,
     InsufficientSystemMemory
@@ -90,6 +91,11 @@ public static class SpeechSeparationAdvisor
         if (asrEngine == AsrEngine.WhisperLiveKitSortformer)
         {
             return Disabled("WhisperLiveKit uses one stateful streaming session and cannot safely consume two separated channels.");
+        }
+
+        if (asrEngine == AsrEngine.WhisperX)
+        {
+            return Disabled("WhisperX uses an isolated PyTorch 2.8 runtime that cannot be mixed with the PyTorch 2.11 separation runtime.");
         }
 
         if (!profile.HasNvidiaGpu)
@@ -150,6 +156,7 @@ public static class SpeechSeparationAdvisor
         {
             ComputeMode.Cpu => SpeechSeparationBlockReason.CpuMode,
             _ when asrEngine == AsrEngine.WhisperLiveKitSortformer => SpeechSeparationBlockReason.StreamingAsr,
+            _ when asrEngine == AsrEngine.WhisperX => SpeechSeparationBlockReason.IsolatedAsrRuntime,
             _ when !profile.HasNvidiaGpu => SpeechSeparationBlockReason.NvidiaGpuRequired,
             _ when profile.GpuMemoryBytes < requiredGpuMemory => SpeechSeparationBlockReason.InsufficientGpuMemory,
             _ when profile.MemoryBytes < requiredSystemMemory => SpeechSeparationBlockReason.InsufficientSystemMemory,

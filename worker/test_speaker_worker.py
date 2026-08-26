@@ -827,6 +827,9 @@ print("ok")
     def test_check_environment_does_not_validate_qwen_as_faster_whisper_model(self) -> None:
         original_has_module = speaker_worker.has_module
         original_qwen_runtime_error = speaker_worker.qwen_asr_runtime_error
+        original_locked_package_error = speaker_worker.locked_package_error
+        original_import_attribute_error = speaker_worker.import_attribute_error
+        original_diarization_runtime_error = speaker_worker.selected_diarization_runtime_error
         original_qwen_files_prepared = speaker_worker.qwen_model_files_prepared
         original_materialize = speaker_worker.materialize_model_cache_links
         original_env = {
@@ -835,6 +838,9 @@ print("ok")
         }
         speaker_worker.has_module = lambda name: name in {"faster_whisper", "qwen_asr", "torch"}
         speaker_worker.qwen_asr_runtime_error = lambda: None
+        speaker_worker.locked_package_error = lambda: None
+        speaker_worker.import_attribute_error = lambda *_args: None
+        speaker_worker.selected_diarization_runtime_error = lambda *_args: None
         speaker_worker.qwen_model_files_prepared = lambda *_args: True
         speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
         os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "qwen3_asr_diarization"
@@ -846,6 +852,9 @@ print("ok")
         finally:
             speaker_worker.has_module = original_has_module
             speaker_worker.qwen_asr_runtime_error = original_qwen_runtime_error
+            speaker_worker.locked_package_error = original_locked_package_error
+            speaker_worker.import_attribute_error = original_import_attribute_error
+            speaker_worker.selected_diarization_runtime_error = original_diarization_runtime_error
             speaker_worker.qwen_model_files_prepared = original_qwen_files_prepared
             speaker_worker.materialize_model_cache_links = original_materialize
             for key, value in original_env.items():
@@ -863,11 +872,17 @@ print("ok")
     def test_check_environment_rejects_incompatible_qwen_runtime(self) -> None:
         original_has_module = speaker_worker.has_module
         original_qwen_runtime_error = speaker_worker.qwen_asr_runtime_error
+        original_locked_package_error = speaker_worker.locked_package_error
+        original_import_attribute_error = speaker_worker.import_attribute_error
+        original_diarization_runtime_error = speaker_worker.selected_diarization_runtime_error
         original_qwen_files_prepared = speaker_worker.qwen_model_files_prepared
         original_materialize = speaker_worker.materialize_model_cache_links
         original_engine = os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE")
         speaker_worker.has_module = lambda name: name in {"faster_whisper", "qwen_asr", "torch"}
         speaker_worker.qwen_asr_runtime_error = lambda: "huggingface-hub must be below 1.0"
+        speaker_worker.locked_package_error = lambda: None
+        speaker_worker.import_attribute_error = lambda *_args: None
+        speaker_worker.selected_diarization_runtime_error = lambda *_args: None
         speaker_worker.qwen_model_files_prepared = lambda *_args: True
         speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
         os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "qwen3_asr_diarization"
@@ -878,6 +893,9 @@ print("ok")
         finally:
             speaker_worker.has_module = original_has_module
             speaker_worker.qwen_asr_runtime_error = original_qwen_runtime_error
+            speaker_worker.locked_package_error = original_locked_package_error
+            speaker_worker.import_attribute_error = original_import_attribute_error
+            speaker_worker.selected_diarization_runtime_error = original_diarization_runtime_error
             speaker_worker.qwen_model_files_prepared = original_qwen_files_prepared
             speaker_worker.materialize_model_cache_links = original_materialize
             if original_engine is None:
@@ -917,15 +935,146 @@ print("ok")
             error,
         )
 
+    def test_package_lock_covers_every_optional_runtime(self) -> None:
+        lock = json.loads((WORKER_PATH.parent / "package-lock.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(1, lock["schemaVersion"])
+        self.assertEqual(
+            {
+                "base",
+                "qwen3-asr",
+                "whisperlivekit-sortformer",
+                "whisperx",
+                "mossformer2-ss-16k",
+                "sepformer-whamr16k",
+            },
+            set(lock["scopes"]),
+        )
+
+    def test_torchaudio_compatibility_shims_cover_speechbrain_backend_api(self) -> None:
+        fake_torchaudio = types.ModuleType("torchaudio")
+        original_torchaudio = sys.modules.get("torchaudio")
+        sys.modules["torchaudio"] = fake_torchaudio
+        try:
+            speaker_worker.apply_torchaudio_compatibility_shims()
+        finally:
+            if original_torchaudio is None:
+                sys.modules.pop("torchaudio", None)
+            else:
+                sys.modules["torchaudio"] = original_torchaudio
+
+        self.assertEqual(["soundfile"], fake_torchaudio.list_audio_backends())
+        self.assertEqual("soundfile", fake_torchaudio.get_audio_backend())
+        self.assertIsNone(fake_torchaudio.set_audio_backend("soundfile"))
+
+    def test_unsupported_model_combinations_have_stable_errors(self) -> None:
+        self.assertIsNone(speaker_worker.unsupported_model_combination_error(
+            "qwen3_asr_diarization",
+            True,
+            "sortformer",
+            "none",
+        ))
+        self.assertIn("Sortformer", speaker_worker.unsupported_model_combination_error(
+            "whisperx",
+            True,
+            "sortformer",
+            "none",
+        ))
+        self.assertIn("WhisperLiveKit", speaker_worker.unsupported_model_combination_error(
+            "whisperlivekit_sortformer",
+            False,
+            "pyannote_community",
+            "mossformer2_ss_16k",
+        ))
+        self.assertIn("WhisperX", speaker_worker.unsupported_model_combination_error(
+            "whisperx",
+            False,
+            "pyannote_community",
+            "sepformer_whamr16k",
+        ))
+
+    def test_ensure_loaded_rejects_unsupported_combination_before_model_import(self) -> None:
+        events = []
+        original_emit = speaker_worker.emit
+        original_whisperx_loader = speaker_worker.load_whisperx_model
+        speaker_worker.emit = events.append
+        speaker_worker.load_whisperx_model = lambda *_args, **_kwargs: self.fail("WhisperX loader must not run")
+        try:
+            engine = speaker_worker.LocalSpeechEngine(Path("models"))
+            engine.configure({
+                "asrEngine": "whisperx",
+                "sttModel": "large-v3-turbo",
+                "diarizationEnabled": True,
+                "diarizationModel": "sortformer",
+                "speechSeparationModel": "none",
+            })
+            events.clear()
+
+            engine.ensure_loaded()
+        finally:
+            speaker_worker.emit = original_emit
+            speaker_worker.load_whisperx_model = original_whisperx_loader
+
+        self.assertFalse(engine.whisper_model)
+        self.assertIn("Sortformer", engine.last_stt_error)
+        self.assertEqual("unsupported_model_combination", events[-1]["code"])
+
+    def test_locked_scope_rejects_version_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_path = Path(temp_dir)
+            metadata_path = package_path / "example_package-1.2.3.dist-info"
+            metadata_path.mkdir()
+            (metadata_path / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: example-package\nVersion: 1.2.3\n",
+                encoding="utf-8",
+            )
+
+            self.assertIsNone(speaker_worker.locked_scope_error(
+                "test",
+                package_path,
+                {"test": {"example-package": "1.2.3"}},
+            ))
+            self.assertIn("expected 1.2.4", speaker_worker.locked_scope_error(
+                "test",
+                package_path,
+                {"test": {"example-package": "1.2.4"}},
+            ))
+
+    def test_locked_scope_distinguishes_cuda_build_from_cpu_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_path = Path(temp_dir)
+            metadata_path = package_path / "torch-2.8.0.dist-info"
+            metadata_path.mkdir()
+            (metadata_path / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: torch\nVersion: 2.8.0\n",
+                encoding="utf-8",
+            )
+
+            error = speaker_worker.locked_scope_error(
+                "whisperx",
+                package_path,
+                {"whisperx": {"torch": "2.8.0+cu128"}},
+            )
+
+        self.assertIn("expected 2.8.0+cu128", error)
+
     def test_check_environment_accepts_whisperlivekit_default_model(self) -> None:
         original_has_module = speaker_worker.has_module
         original_materialize = speaker_worker.materialize_model_cache_links
+        original_locked_package_error = speaker_worker.locked_package_error
+        original_import_attribute_error = speaker_worker.import_attribute_error
+        original_whisperlivekit_runtime_error = speaker_worker.whisperlivekit_runtime_error
+        original_diarization_runtime_error = speaker_worker.selected_diarization_runtime_error
         original_env = {
             "LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"),
             "LIVE_DIALOGUE_TRANSLATOR_STT_MODEL": os.environ.get("LIVE_DIALOGUE_TRANSLATOR_STT_MODEL"),
         }
         speaker_worker.has_module = lambda name: name in {"faster_whisper", "whisperlivekit", "torch"}
         speaker_worker.materialize_model_cache_links = lambda *_args, **_kwargs: False
+        speaker_worker.locked_package_error = lambda: None
+        speaker_worker.import_attribute_error = lambda *_args: None
+        speaker_worker.whisperlivekit_runtime_error = lambda *_args: None
+        speaker_worker.selected_diarization_runtime_error = lambda *_args: None
         os.environ["LIVE_DIALOGUE_TRANSLATOR_ASR_ENGINE"] = "whisperlivekit_sortformer"
         os.environ["LIVE_DIALOGUE_TRANSLATOR_STT_MODEL"] = "default"
         stdout = io.StringIO()
@@ -938,6 +1087,10 @@ print("ok")
             finally:
                 speaker_worker.has_module = original_has_module
                 speaker_worker.materialize_model_cache_links = original_materialize
+                speaker_worker.locked_package_error = original_locked_package_error
+                speaker_worker.import_attribute_error = original_import_attribute_error
+                speaker_worker.whisperlivekit_runtime_error = original_whisperlivekit_runtime_error
+                speaker_worker.selected_diarization_runtime_error = original_diarization_runtime_error
                 for key, value in original_env.items():
                     if value is None:
                         os.environ.pop(key, None)

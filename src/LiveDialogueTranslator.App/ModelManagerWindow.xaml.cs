@@ -244,39 +244,52 @@ public partial class ModelManagerWindow : Window
             }
 
             var targetDirectory = paths.AsrPackageDirectory(engine);
-            Directory.CreateDirectory(targetDirectory);
-            OutputBox.Text = $"{L("InstallingAsrEnginePackages")}{Environment.NewLine}{L("AsrEnginePackagesCanTakeMinutes")}";
-            var psi = new ProcessStartInfo
+            var stagingDirectory = PackageInstallStamp.CreateStagingDirectory(targetDirectory);
+            try
             {
-                FileName = pythonExe,
-                Arguments = PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, targetDirectory),
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            PythonProcessEnvironment.Apply(psi.Environment);
-            AsrEngineEnvironment.Apply(
-                psi.Environment,
-                paths,
-                settings.AsrEngine,
-                settings.DiarizationModel,
-                effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
+                OutputBox.Text = $"{L("InstallingAsrEnginePackages")}{Environment.NewLine}{L("AsrEnginePackagesCanTakeMinutes")}";
+                var psi = new ProcessStartInfo
+                {
+                    FileName = pythonExe,
+                    Arguments = PythonPipCommands.InstallRequirementsToTargetArguments(
+                        requirementsPath,
+                        stagingDirectory,
+                        includeCudaTorchIndex: engine == AsrEngine.WhisperX),
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                PythonProcessEnvironment.Apply(psi.Environment);
+                AsrEngineEnvironment.Apply(
+                    psi.Environment,
+                    paths,
+                    settings.AsrEngine,
+                    settings.DiarizationModel,
+                    effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
 
-            using var process = Process.Start(psi);
-            if (process == null)
-            {
-                OutputBox.Text = L("UnableToStartPython");
-                return false;
+                using var process = Process.Start(psi);
+                if (process == null)
+                {
+                    OutputBox.Text = L("UnableToStartPython");
+                    return false;
+                }
+
+                var output = await process.StandardOutput.ReadToEndAsync();
+                var error = FilterBenignStderr(await process.StandardError.ReadToEndAsync());
+                await process.WaitForExitAsync();
+                if (process.ExitCode != 0)
+                {
+                    OutputBox.Text = $"{L("PythonPackageInstallFailed")}{Environment.NewLine}{output}{Environment.NewLine}{error}";
+                    return false;
+                }
+
+                PackageInstallStamp.MarkCurrent(requirementsPath, stagingDirectory);
+                PackageInstallStamp.CommitStagingDirectory(stagingDirectory, targetDirectory);
             }
-
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = FilterBenignStderr(await process.StandardError.ReadToEndAsync());
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0)
+            finally
             {
-                OutputBox.Text = $"{L("PythonPackageInstallFailed")}{Environment.NewLine}{output}{Environment.NewLine}{error}";
-                return false;
+                PackageInstallStamp.DeleteStagingDirectory(stagingDirectory, targetDirectory);
             }
         }
 
@@ -298,43 +311,52 @@ public partial class ModelManagerWindow : Window
         }
 
         var targetDirectory = paths.SpeechSeparationPackageDirectory(effectiveSpeechSeparationModel);
-        Directory.CreateDirectory(targetDirectory);
-        OutputBox.Text = $"{L("InstallingSpeechSeparationPackages")}{Environment.NewLine}{L("SpeechSeparationPackagesCanTakeMinutes")}";
-        var psi = new ProcessStartInfo
+        var stagingDirectory = PackageInstallStamp.CreateStagingDirectory(targetDirectory);
+        try
         {
-            FileName = pythonExe,
-            Arguments = PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, targetDirectory),
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        PythonProcessEnvironment.Apply(psi.Environment);
-        AsrEngineEnvironment.Apply(
-            psi.Environment,
-            paths,
-            settings.AsrEngine,
-            settings.DiarizationModel,
-            effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
-        SpeechSeparationEnvironment.Apply(psi.Environment, paths, effectiveSpeechSeparationModel);
+            OutputBox.Text = $"{L("InstallingSpeechSeparationPackages")}{Environment.NewLine}{L("SpeechSeparationPackagesCanTakeMinutes")}";
+            var psi = new ProcessStartInfo
+            {
+                FileName = pythonExe,
+                Arguments = PythonPipCommands.InstallRequirementsToTargetArguments(requirementsPath, stagingDirectory),
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            PythonProcessEnvironment.Apply(psi.Environment);
+            AsrEngineEnvironment.Apply(
+                psi.Environment,
+                paths,
+                settings.AsrEngine,
+                settings.DiarizationModel,
+                effectiveSpeechSeparationModel == SpeechSeparationModel.None && settings.DiarizationEnabled);
+            SpeechSeparationEnvironment.Apply(psi.Environment, paths, effectiveSpeechSeparationModel);
 
-        using var process = Process.Start(psi);
-        if (process == null)
-        {
-            OutputBox.Text = L("UnableToStartPython");
-            return false;
-        }
+            using var process = Process.Start(psi);
+            if (process == null)
+            {
+                OutputBox.Text = L("UnableToStartPython");
+                return false;
+            }
 
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = FilterBenignStderr(await process.StandardError.ReadToEndAsync());
-        await process.WaitForExitAsync();
-        if (process.ExitCode == 0)
-        {
+            var output = await process.StandardOutput.ReadToEndAsync();
+            var error = FilterBenignStderr(await process.StandardError.ReadToEndAsync());
+            await process.WaitForExitAsync();
+            if (process.ExitCode != 0)
+            {
+                OutputBox.Text = $"{L("PythonPackageInstallFailed")}{Environment.NewLine}{output}{Environment.NewLine}{error}";
+                return false;
+            }
+
+            PackageInstallStamp.MarkCurrent(requirementsPath, stagingDirectory);
+            PackageInstallStamp.CommitStagingDirectory(stagingDirectory, targetDirectory);
             return true;
         }
-
-        OutputBox.Text = $"{L("PythonPackageInstallFailed")}{Environment.NewLine}{output}{Environment.NewLine}{error}";
-        return false;
+        finally
+        {
+            PackageInstallStamp.DeleteStagingDirectory(stagingDirectory, targetDirectory);
+        }
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
